@@ -1,0 +1,11 @@
+# Generally ignores everything except files within the allowed directories
+
+/*
+!/src/
+!/tiny-verse/
+!.gitignore
+!.gitattributes
+!.gitmodules
+!CMakeLists.txt
+!LICENSE
+!README.md

@@ -1,0 +1,3 @@
+[submodule "tiny-verse/common"]
+	path = tiny-verse/common
+	url = git@github.com:tiny-verse/common.git
