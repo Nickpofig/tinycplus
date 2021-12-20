@@ -1,18 +1,15 @@
 #pragma once
 
-// standard
-#include <memory>
 #include <unordered_set>
 
-// internal
-#include "tinycpp/shared.h"
-#include "tinycpp/ast.h"
+#include "common/parser.h"
 
+#include "ast.h"
 
 namespace tinycpp {
 
+    using Lexer = tiny::Lexer;
     using ParserBase = tiny::ParserBase;
-    using ParserError = tiny::ParserError;
 
     namespace symbols {
         static Symbol KwBase {"base"};
@@ -24,40 +21,35 @@ namespace tinycpp {
         static Symbol KwThis {"this"};
         static Symbol KwTrait {"trait"};
 
-        bool isKeyword(Symbol const & s) {
-            return
-                s == KwBase
-                || s == KwClass 
-                || s == KwIs
-                || s == KwPrivate
-                || s == KwProtected
-                || s == KwPublic
-                || s == KwThis
-                || s == KwTrait
-                ;
-        }
-    }
+        bool isKeyword(Symbol const & s);
+    } // namespace symbols
 
     class Parser : public ParserBase {
     public:
-        static uptr<AST> ParseFile(std::string const & filename) {
+        static std::unique_ptr<ASTBase> ParseFile(std::string const & filename) {
             Parser p{Lexer::TokenizeFile(filename)};
-            p.addTypeName(Symbol::KwInt);
-            p.addTypeName(Symbol::KwChar);
-            uptr<AST> result{p.parseProgram()};
+            std::unique_ptr<ASTBase> result{p.PROGRAM()};
             p.pop(Token::Kind::EoF);
             return result;
         }
-    protected:
-        Parser(std::vector<Token> && tokens):
-            ParserBase{std::move(tokens)} {
+
+        static std::unique_ptr<ASTBase> Parse(std::string const & code, std::string const & filename) {
+            Parser p{Lexer::Tokenize(code, filename)};
+            std::unique_ptr<ASTBase> result{p.REPL()};
+            p.pop(Token::Kind::EoF);
+            return result;
         }
+
+    protected:
+
+        Parser(std::vector<Token> && tokens): ParserBase{std::move(tokens)} { }
+
 
         /** Determines if given token is a language keyword.
          */
         bool isKeyword(Token const & t) {
             return 
-                // tinyc keywords
+                // tinycpp keywords
                 t == Symbol::KwBreak
                 || t == Symbol::KwCase
                 || t == Symbol::KwCast
@@ -86,9 +78,24 @@ namespace tinycpp {
             return t.kind() == Token::Kind::Identifier && !isKeyword(t);
         }
 
+        /** \name Types Ambiguity
+
+            tinyC shares the unfortunate problem of C and C++ grammars which makes it impossible to determine whether an expression is type declaration or an expression simply from the grammar. take for instance
+
+                foo * a;
+
+            Is this declaration of variable of name `a` with type `foo*`, or is this multiplication of two variables `foo` and `a`. Ideally this ambiguity should be solved at the grammar level such as introducing `var` keyword, or some such, but for educational purposes we have decided to keep this "feature" in the language.
+
+            The way to fix this is to make the parser track all possible type names so that an identifier can be resolved as being either variable, or a type, thus removing the ambiguity. In tiny's case this is further complicated by the parser being state-full in the repl mode.
+         */
+
         std::unordered_set<Symbol> possibleTypes_;
         std::vector<Symbol> possibleTypesStack_;
 
+        /** Returns true if given symbol is a type.
+
+            Checks both own tentative records and the frontend's valid records.
+         */
         bool isTypeName(Symbol name) const;
 
         /** Adds given symbol as a tentative typename.
@@ -115,12 +122,10 @@ namespace tinycpp {
             }
         };
 
-        // === Case Rollback ===
-        /// TODO: possibleTypesStack, position(), revretTo(): are helpful if a case could fail,
-        ///       so we may return and try another case.
         Position position() {
             return Position{ParserBase::position(), possibleTypesStack_.size()};
         }
+
         void revertTo(Position const & p) {
             ParserBase::revertTo(p.position_);
             while (possibleTypesStack_.size() > p.possibleTypesSize_) {
@@ -128,108 +133,49 @@ namespace tinycpp {
                 possibleTypesStack_.pop_back();
             }
         }
-        // =====================
 
+        /*  Parsing
 
-        void throwError(const std::string & message) const {
-            throw ParserError{message, top().location(), eof()};
-        }
+            Nothing fancy here, just a very simple recursive descent parser built on the basic framework.
+         */
+        std::unique_ptr<AST> PROGRAM();
+        std::unique_ptr<AST> REPL();
+        std::unique_ptr<AST> FUN_DECL();
+        std::unique_ptr<AST> STATEMENT();
+        std::unique_ptr<AST> BLOCK_STMT();
+        std::unique_ptr<ASTIf> IF_STMT();
+        std::unique_ptr<AST> SWITCH_STMT();
+        std::unique_ptr<AST> CASE_BODY();
+        std::unique_ptr<AST> WHILE_STMT();
+        std::unique_ptr<AST> DO_WHILE_STMT();
+        std::unique_ptr<AST> FOR_STMT();
+        std::unique_ptr<AST> BREAK_STMT();
+        std::unique_ptr<AST> CONTINUE_STMT();
+        std::unique_ptr<ASTReturn> RETURN_STMT();
+        std::unique_ptr<AST> EXPR_STMT();
+        std::unique_ptr<ASTType> TYPE(bool canBeVoid = false);
+        std::unique_ptr<ASTType> TYPE_FUN_RET();
+        std::unique_ptr<ASTStructDecl> STRUCT_DECL();
+        std::unique_ptr<ASTFunPtrDecl> FUNPTR_DECL();
+        std::unique_ptr<AST> EXPR_OR_VAR_DECL();
+        std::unique_ptr<ASTVarDecl> VAR_DECL();
+        std::unique_ptr<AST> VAR_DECLS();
+        std::unique_ptr<AST> EXPR();
+        std::unique_ptr<AST> EXPRS();
+        std::unique_ptr<AST> E9();
+        std::unique_ptr<AST> E8();
+        std::unique_ptr<AST> E7();
+        std::unique_ptr<AST> E6();
+        std::unique_ptr<AST> E5();
+        std::unique_ptr<AST> E4();
+        std::unique_ptr<AST> E3();
+        std::unique_ptr<AST> E2();
+        std::unique_ptr<AST> E1();
+        std::unique_ptr<AST> E_UNARY_PRE();
+        std::unique_ptr<AST> E_CALL_INDEX_MEMBER_POST();
+        std::unique_ptr<AST> F();
+        std::unique_ptr<ASTIdentifier> IDENT();
 
-        Symbol popIdentifierAsNewType() {
-            auto token = pop(Token::Kind::Identifier);
-            auto symbol = token.valueSymbol();
-            possibleTypes_.insert(symbol);
-            return symbol;
-        }
+    }; // tiny::Parser
 
-        Symbol popIdentifier(bool asType) {
-            auto token = pop(Token::Kind::Identifier);
-            auto symbol = token.valueSymbol();
-            bool isType = possibleTypes_.find(symbol) != possibleTypes_.end();
-            if (asType && !isType) {
-                throwError(STR("Dont know type with name: " << symbol));
-            }
-            else if (!asType && isType) {
-                throwError(STR("Identifier cant be a type: " << symbol));
-            }
-            return symbol;
-        }
-
-        int popInteger(bool isSigned) {
-            auto token = pop(Token::Kind::Integer);
-            int value = token.valueInt();
-            if (!isSigned && value < 0) {
-                throwError(STR("Expected unsigned integer, but got signed: " << value));
-            }
-            return value;
-        }
-
-        bool nextIsField(uptr<AST> & result) {
-            if (condPop(Symbol::KwTypedef)) { // function ptr
-                assert(false && "not implemented");
-            } else {
-                auto * ast = new AST::Raw(top());
-                ast->add(top()); popIdentifier(true);
-                auto t = top();
-                while(condPop(Symbol::Mul)) {
-                    ast->add(t);
-                }
-                ast->add(top()); popIdentifier(false);
-                t = top();
-                if (condPop(Symbol::SquareOpen)) {
-                    ast->add(t);
-                    ast->add(pop(Token::Kind::Integer));
-                    ast->add(pop(Symbol::SquareClose));
-                }
-                ast->add(pop(Symbol::Semicolon));
-                result.reset(ast);
-                return true;
-            }
-            return false;
-        }
-
-        bool nextIsClass(uptr<AST> & result) {
-            if (!condPop(symbols::KwClass)) {
-                return false;
-            }
-            auto astClass = new AST::Class{top()};
-            auto className = popIdentifierAsNewType();
-            pop(Symbol::CurlyOpen);
-            while(!condPop(Symbol::CurlyClose)) {
-                uptr<AST> astMember;
-                if (nextIsField(astMember)) {
-                    astClass->takeAsField(astMember);
-                }
-            }
-            pop(Symbol::Semicolon);
-            result.reset(astClass);
-            return true;
-        }
-
-        uptr<AST> parseProgram() {
-            auto rootScope = new AST::Scope{top()};
-            AST::Raw * skippedPart = nullptr;
-            auto flushSkippedPart = [&rootScope, &skippedPart] {
-                if (skippedPart != nullptr) {
-                    rootScope->take(uptr<AST>{skippedPart});
-                    skippedPart = nullptr;
-                }
-            };
-            while (!eof()) {
-                uptr<AST> ast;
-                if (nextIsClass(ast)) {
-                    flushSkippedPart();
-                    rootScope->take(ast);
-                } else {
-                    if (skippedPart == nullptr) {
-                        skippedPart = new AST::Raw{top()};
-                    }
-                    skippedPart->add(pop());
-                }
-            }
-            return uptr<AST>{rootScope};
-        }
-
-    }; // class Parser
-
-} // namespace tinycpp
+} // namespace tiny
