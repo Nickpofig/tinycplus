@@ -13,11 +13,6 @@ namespace tinycpp {
 
     namespace symbols {
         static Symbol KwClass {"class"};
-        static Symbol KwIs {"is"};
-        static Symbol KwPrivate {"private"};
-        static Symbol KwProtected {"protected"};
-        static Symbol KwPublic {"public"};
-        static Symbol KwTrait {"trait"};
 
         bool isKeyword(Symbol const & s);
     } // namespace symbols

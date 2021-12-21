@@ -6,13 +6,10 @@ namespace tinycpp {
         bool isKeyword(Symbol const & s) {
             return false
                 || s == KwClass
-                || s == KwIs
-                || s == KwPrivate
-                || s == KwProtected
-                || s == KwPublic
-                || s == KwTrait
-                // || s == KwBase
-                // || s == KwThis
+                // || s == KwIs
+                // || s == KwPrivate
+                // || s == KwProtected
+                // || s == KwPublic
                 ;
         }
     }
@@ -20,8 +17,6 @@ namespace tinycpp {
     bool Parser::isTypeName(Symbol name) const {
         if (possibleTypes_.find(name) != possibleTypes_.end())
             return true;
-        // if (frontend_.isTypeName(name))
-        //     return true;
         return false;
     }
 

@@ -2,16 +2,18 @@
 Transpiler from Object-Oriented extension TinyC+ to TinyC programming lamguage.
 
 # Language Reference
+# tinyC Language Reference
 
-### Root
+    PROGRAM := { FUN_DECL | VAR_DECLS ';' | STRUCT_DECL | FUNPTR_DECL }
 
-    PROGRAM := { NAMESPACE }
-    NAMESPACE := 'namespace' identifier [ '.' identifier ] '{' [ { VAR_DECLS ';' | CLASS_DECL | STRUCT_DECL | FUN_DECL | FUNPTR_DECL } ] '}'
+A program is collection of function and variable declarations. Alternatively, *tinyC* supports a repl-like interface, where the main element is either a program, or a stetement:
+
+    REPL := STATEMENT | PROGRAM
+
 
 ### Functions
 
-    FUN_DECL := TYPE_FUN_RET identifier '(' [ FUN_ARG { ',' FUN_ARG } ] ')' FUN_DECL_END
-    FUN_DECL_END := BLOCK_STMT | ';'
+    FUN_DECL := TYPE_FUN_RET identifier '(' [ FUN_ARG { ',' FUN_ARG } ] ')' [ BLOCK_STMT ]
     FUN_ARG := TYPE identifier
 
 Functions are declared the same way as in C. A function definition starts with the return type, followed by function name and arguments. Arguments have type and name. Default values or variadic arguments are not supported. Functions can be declared or defined. Function definitions must have their body.
@@ -22,20 +24,20 @@ Functions are declared the same way as in C. A function definition starts with t
 
     BLOCK_STMT := '{' { STATEMENT } '}'
 
-    IF_STMT := 'if' '(' EXPR ')' STATEMENT [ 'else' STATEMENT ]
+    IF_STMT := if '(' EXPR ')' STATEMENT [ else STATEMENT ]
 
-    SWITCH_STMT := 'switch' '(' EXPR ')' '{' { CASE_STMT } [ 'default' ':' CASE_BODY } ] { CASE_STMT } '}'
-    CASE_STMT := 'case' integer_literal ':' CASE_BODY
+    SWITCH_STMT := switch '(' EXPR ')' '{' { CASE_STMT } [ default ':' CASE_BODY } ] { CASE_STMT } '}'
+    CASE_STMT := case integer_literal ':' CASE_BODY
     CASE_BODY := { STATEMENT }
 
-    WHILE_STMT := 'while' '(' EXPR ')' STATEMENT
-    DO_WHILE_STMT := 'do' STATEMENT 'while' '(' EXPR ')' ';'
-    FOR_STMT := 'for' '(' [ EXPR_OR_VAR_DECL ] ';' [ EXPR ] ';' [ EXPR ] ')' STATEMENT
+    WHILE_STMT := while '(' EXPR ')' STATEMENT
+    DO_WHILE_STMT := do STATEMENT while '(' EXPR ')' ';'
+    FOR_STMT := for '(' [ EXPR_OR_VAR_DECL ] ';' [ EXPR ] ';' [ EXPR ] ')' STATEMENT
 
-    BREAK_STMT := 'break' ';'
-    CONTINUE_STMT := 'continue' ';'
+    BREAK_STMT := break ';'
+    CONTINUE_STMT := continue ';'
 
-    RETURN_STMT := 'return' [ EXPR ] ';'
+    RETURN_STMT := return [ EXPR ] ';'
 
     EXPR_STMT := EXPR_OR_VAR_DECL ';'
 
@@ -43,43 +45,38 @@ Functions are declared the same way as in C. A function definition starts with t
 
 To keep the type declarations similar to those of `C` while keeping the grammar simple to parse, the type declarations grammar is a bit repetitive:
 
-    TYPE := ('int' | 'double' | 'char' | identifier) { '*' }
-         |= 'void' '*' { '*' }
+    TYPE := (int | double | char | identifier) { * }
+         |= void * { * }
 
-    TYPE_FUN_RET := TYPE | 'void'
+    TYPE_FUN_RET := TYPE | void
 
 Pointers can point to either a plain type, an identifier representing a struct or function pointer type, or `void`. Pointers to pointers are allowed.
 
 ### Type Declarations
 
-    CLASS_DECL := 'class' identifier [ '{' { [ CLASS_PUB | CLASS_PRV | CLASS_PROT ] } '}' ] ';'
-    CLASS_CONS := TYPE '(' [ FUN_ARG { ',' FUN_ARG } ] ')' BLOCK_STMT
-    CLASS_DEST := '~' CLASS_CONS
-    CLASS_PUB := 'public:' { FIELD_DECL | FUN_DECL }
-    CLASS_PRV := 'private:' { FIELD_DECL | FUN_DECL }
-    CLASS_PROT := 'protected:' { FIELD_DECL | FUN_DECL }
-    FIELD_DECL := TYPE identifier ';'
-
-    TRAIT_DECL := 'trait' identifier [ ]
-
     STRUCT_DECL := 'struct' identifier [ '{' { TYPE identifier ';' } '}' ] ';'
 
 Structured types must always be declared before they are used. Forward declarations are supported as well.
 
-    FUNPTR_DECL := 'typedef' TYPE_FUN_RET '(' '*' identifier ')' '(' [ TYPE { ',' TYPE } ] ')' ';'
+    CLASS_DECL := 'class' identifier [ '{' { TYPE identifier ';' | FUN_DECL } '}' ] ';'
+
+To access class members (fields/methods) the "this" implicit variable of pointer type must be used.
+When translated to TinyC, "this" is a pointer to 'owner' object with corresponding type.
+
+    FUNPTR_DECL := typedef TYPE_FUN_RET '(' '*' identifier ')' '(' [ TYPE { ',' TYPE } ] ')' ';'
 
 Function pointers must always be declared before they can be used.
 
 
 ### Expressions
 
-    F := 'int' | 'double' | 'char' | identifier | '(' EXPR ')' | E_CAST
-    E_CAST := 'cast' '<' TYPE '>' '(' EXPR ')'
+    F := integer | double | char | string | identifier | '(' EXPR ')' | E_CAST
+    E_CAST := cast '<' TYPE '>' '(' EXPR ')'
 
     E_CALL_INDEX_MEMBER_POST := F { E_CALL | E_INDEX | E_MEMBER | E_POST }
     E_CALL := '(' [ EXPR { ',' EXPR } ] ')'
     E_INDEX := '[' EXPR ']'
-    E_MEMBER := ('.' | '->') identifier
+    E_MEMBER := ('.' | '->') identifier [ E_CALL ]
     E_POST := '++' | '--'
 
     E_UNARY_PRE := { '+' | '-' | '!' | '~' | '++' | '--' | '*' | '&' } E_CALL_INDEX_MEMBER_POST
