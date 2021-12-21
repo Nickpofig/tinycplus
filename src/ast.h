@@ -181,9 +181,6 @@ namespace tinycpp {
             return ss.str();
         }
 
-    public:
-        virtual void printAsVariable(ASTPrettyPrinter & printer, ASTIdentifier const * variableName) const = 0;
-
     protected:
         ASTType(Token const & t):
             AST{t} {
@@ -214,11 +211,6 @@ namespace tinycpp {
             p << (*base) << p.symbol << "*";
         }
 
-        void printAsVariable(ASTPrettyPrinter & p, ASTIdentifier const * variableName) const override {
-            print(p);
-            p << " " << (*variableName);
-        }
-
     protected:
         void buildStringRepresentation(std::ostream & s) const override {
             toString(base.get(), s);
@@ -244,10 +236,6 @@ namespace tinycpp {
             p << (*base) << p.symbol << "[" << *size << p.symbol << "]";
         }
 
-        void printAsVariable(ASTPrettyPrinter & p, ASTIdentifier const * variableName) const override {
-            p << (*base) << " " << (*variableName) << p.symbol << "[" << *size << p.symbol << "]";
-        }
-
     protected:
         void buildStringRepresentation(std::ostream & s) const override {
             toString(base.get(), s);
@@ -269,11 +257,6 @@ namespace tinycpp {
 
         void print(ASTPrettyPrinter & p) const override {
             p << p.type << name.name();
-        }
-
-        void printAsVariable(ASTPrettyPrinter & p, ASTIdentifier const * variableName) const override {
-            print(p);
-            p << " " << (*variableName);
         }
 
     protected:
@@ -324,7 +307,6 @@ namespace tinycpp {
             ASTSequence{t} {
         }
 
-
         void print(ASTPrettyPrinter & p) const override {
             p << p.symbol << "{";
             p.indent();
@@ -355,7 +337,7 @@ namespace tinycpp {
         }
 
         void print(ASTPrettyPrinter & p) const override {
-            type->printAsVariable(p, name.get());
+            p << (*type) << " " << (*name);
             if (value.get() != nullptr) {
                 p << p.symbol << " = " << (*value);
             }
@@ -371,7 +353,7 @@ namespace tinycpp {
     public:
         std::unique_ptr<ASTType> typeDecl;
         Symbol name;
-        std::vector<std::pair<std::unique_ptr<ASTType>, std::unique_ptr<ASTIdentifier>>> args;
+        std::vector<std::unique_ptr<ASTVarDecl>> args;
         std::unique_ptr<AST> body;
 
         ASTFunDecl(Token const & t, std::unique_ptr<ASTType> type):
@@ -380,14 +362,13 @@ namespace tinycpp {
             name{t.valueSymbol()} {
         }
 
-
         void print(ASTPrettyPrinter & p) const override {
             p << (*typeDecl) << " " << p.identifier << name.name() << p.symbol << "(";
-            auto i = args.begin();
-            if (i != args.end()) {
-                p << *(i->first) << " " << *(i->second);
-                while (++i != args.end())
-                    p << p.symbol << ", " << *(i->first) << " " << *(i->second);
+            auto arg = args.begin();
+            if (arg != args.end()) {
+                p << *arg[0];
+                while (++arg != args.end())
+                    p << p.symbol << ", " << *arg[0];
             }
             p << p.symbol << ")" << (*body);
         }
@@ -436,7 +417,7 @@ namespace tinycpp {
     class ASTClassDecl : public AST {
     public:
         Symbol name;
-        std::unique_ptr<ASTIdentifier> baseClassName;
+        std::unique_ptr<ASTIdentifier> baseClass;
         std::vector<std::unique_ptr<ASTVarDecl>> fields;
         std::vector<std::unique_ptr<ASTFunDecl>> methods;
 
@@ -636,7 +617,6 @@ namespace tinycpp {
 
         void print(ASTPrettyPrinter & p) const override {
             p << p.keyword << "break";
-
         }
 
     protected:
@@ -753,7 +733,6 @@ namespace tinycpp {
 
         void print(ASTPrettyPrinter & p) const override {
             p << p.symbol << op.name() << *arg;
-
         }
 
     protected:
@@ -865,12 +844,12 @@ namespace tinycpp {
     class ASTMember : public AST {
     public:
         std::unique_ptr<AST> base;
-        Symbol member;
+        std::unique_ptr<AST> member;
 
-        ASTMember(Token const & t, std::unique_ptr<AST> base, Symbol member):
+        ASTMember(Token const & t, std::unique_ptr<AST> base, std::unique_ptr<AST> member):
             AST{t},
             base{std::move(base)},
-            member(member) {
+            member{std::move(member)} {
         }
 
         /** If the base has address, then its element must have address too.
@@ -879,9 +858,8 @@ namespace tinycpp {
             return base->hasAddress();
         }
 
-
         void print(ASTPrettyPrinter & p) const override {
-            p << *base << p.symbol << "." << p.identifier << member.name();
+            p << *base << p.symbol << "." << p.identifier << *member;
         }
 
     protected:
@@ -892,12 +870,12 @@ namespace tinycpp {
     class ASTMemberPtr : public AST {
     public:
         std::unique_ptr<AST> base;
-        Symbol member;
+        std::unique_ptr<AST> member;
 
-        ASTMemberPtr(Token const & t, std::unique_ptr<AST> base, Symbol member):
+        ASTMemberPtr(Token const & t, std::unique_ptr<AST> base, std::unique_ptr<AST> member):
             AST{t},
             base{std::move(base)},
-            member(member) {
+            member{std::move(member)} {
         }
 
         /** Since member of pointer's rhs must have an adrress (it's a pointer), the element must have address as well.
@@ -906,9 +884,8 @@ namespace tinycpp {
             return true;
         }
 
-
         void print(ASTPrettyPrinter & p) const override {
-            p << *base << p.symbol << "->" << p.identifier << member.name();
+            p << *base << p.symbol << "->" << p.identifier << *member;
         }
 
     protected:
@@ -1032,6 +1009,7 @@ namespace tinycpp {
     inline void ASTBlock::accept(ASTVisitor * v) { v->visit(this); }
     inline void ASTVarDecl::accept(ASTVisitor * v) { v->visit(this); }
     inline void ASTFunDecl::accept(ASTVisitor * v) { v->visit(this); }
+    inline void ASTClassDecl::accept(ASTVisitor * v) { v->visit(this); }
     inline void ASTStructDecl::accept(ASTVisitor * v) { v->visit(this); }
     inline void ASTFunPtrDecl::accept(ASTVisitor * v) { v->visit(this); }
     inline void ASTIf::accept(ASTVisitor * v) { v->visit(this); }

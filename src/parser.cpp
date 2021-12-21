@@ -4,15 +4,15 @@ namespace tinycpp {
 
     namespace symbols {
         bool isKeyword(Symbol const & s) {
-            return
-                s == KwBase
+            return false
                 || s == KwClass
                 || s == KwIs
                 || s == KwPrivate
                 || s == KwProtected
                 || s == KwPublic
-                || s == KwThis
                 || s == KwTrait
+                // || s == KwBase
+                // || s == KwThis
                 ;
         }
     }
@@ -25,6 +25,22 @@ namespace tinycpp {
         return false;
     }
 
+    std::unique_ptr<AST> Parser::FUN_OR_VAR_DECL() {
+        // it can be either function or variable declaration now, we just do the dirty trick by first parsing the type and identifier to determine whether we re dealing with a function or variable declaration, then revert the parser and parser the proper nonterminal this time
+        Position x = position();
+        TYPE(true);
+        IDENT();
+        if (top() == Symbol::ParOpen) {
+            revertTo(x);
+            return FUN_DECL();
+        } else {
+            revertTo(x);
+            auto varDecl = VAR_DECLS();
+            pop(Symbol::Semicolon);
+            return varDecl;
+        }
+    }
+
     /* PROGRAM := { FUN_DECL | VAR_DECLS ';' | STRUCT_DECL | FUNPTR_DECL }
         TODO the simple try & fail & try something else produces ugly error messages.
         */
@@ -33,21 +49,12 @@ namespace tinycpp {
         while (! eof()) {
             if (top() == Symbol::KwStruct) {
                 result->body.push_back(STRUCT_DECL());
+            } else if (top() == symbols::KwClass) {
+                result->body.push_back(CLASS_DECL());
             } else if (top() == Symbol::KwTypedef) {
                 result->body.push_back(FUNPTR_DECL());
             } else {
-                // it can be either function or variable declaration now, we just do the dirty trick by first parsing the type and identifier to determine whether we re dealing with a function or variable declaration, then revert the parser and parser the proper nonterminal this time
-                Position x = position();
-                TYPE(true);
-                IDENT();
-                if (top() == Symbol::ParOpen) {
-                    revertTo(x);
-                    result->body.push_back(FUN_DECL());
-                } else {
-                    revertTo(x);
-                    result->body.push_back(VAR_DECLS());
-                    pop(Symbol::Semicolon);
-                }
+                result->body.push_back(FUN_OR_VAR_DECL());
             }
         }
         return result;
@@ -78,14 +85,15 @@ namespace tinycpp {
         pop(Symbol::ParOpen);
         if (top() != Symbol::ParClose) {
             do {
-                std::unique_ptr<ASTType> argType{TYPE()};
-                std::unique_ptr<ASTIdentifier> argName{IDENT()};
+                std::unique_ptr<ASTVarDecl> arg{new ASTVarDecl{top(), TYPE()}};
+                arg->name = IDENT();
                 // check that the name is unique
-                for (auto & i : result->args)
-                    if (i.second->name == argName->name)
-                        throw ParserError(STR("Function argument " << argName->name << " altready defined"), argName->location(), false);
-                result->args.push_back(std::make_pair(std::move(argType), std::move(argName)));
-
+                for (auto & i : result->args) {
+                    if (i->name.get() == arg->name.get()) {
+                        throw ParserError(STR("Function argument " << arg->name->name.name() << " altready defined"), arg->name->location(), false);
+                    }
+                }
+                result->args.push_back(std::move(arg));
             } while (condPop(Symbol::Comma));
         }
         pop(Symbol::ParClose);
@@ -318,7 +326,6 @@ namespace tinycpp {
 
     /* FUNPTR_TYPE_DECL := typedef TYPE_FUN_RET '(' '*' identifier ')' '(' [ TYPE { ',' TYPE } ] ')' ';'
         */
-
     std::unique_ptr<ASTFunPtrDecl> Parser::FUNPTR_DECL() {
         Token const & start = pop(Symbol::KwTypedef);
         std::unique_ptr<ASTType> returnType{TYPE_FUN_RET()};
@@ -337,6 +344,37 @@ namespace tinycpp {
         pop(Symbol::ParClose);
         pop(Symbol::Semicolon);
         return result;
+    }
+
+    /* CLASS_DECL := 'class' TODO
+        */
+    std::unique_ptr<ASTClassDecl> Parser::CLASS_DECL() {
+        auto const & start = pop(symbols::KwClass);
+        std::unique_ptr<ASTClassDecl> classDecl{new ASTClassDecl{start, pop(Token::Kind::Identifier).valueSymbol()}};
+        addTypeName(classDecl->name);
+        // Parses base class
+        if (condPop(Symbol::Colon)) {
+            classDecl->baseClass = IDENT();
+        }
+        // Parses body
+        if (condPop(Symbol::CurlyOpen)) {
+            while (! condPop(Symbol::CurlyClose)) {
+                // parsing field and method
+                auto member = FUN_OR_VAR_DECL();
+                if (auto * fields = dynamic_cast<ASTSequence*>(member.get())) { // saving as sequence of fields
+                    for (auto & i : fields->body) {
+                        auto * field = dynamic_cast<ASTVarDecl*>(i.release());
+                        classDecl->fields.push_back(std::unique_ptr<ASTVarDecl>(field));
+                    }
+                } else if (auto function = dynamic_cast<ASTFunDecl*>(member.get())) { // saving as method
+                    classDecl->methods.push_back(std::unique_ptr<ASTFunDecl>(function));
+                }
+                member.release();
+            }
+            classDecl->isDefinition = true;
+        }
+        pop(Symbol::Semicolon);
+        return classDecl;
     }
 
     // Expressions ----------------------------------------------------------------------------------------------------
@@ -527,23 +565,28 @@ namespace tinycpp {
         }
     }
 
+    std::unique_ptr<AST> Parser::E_CALL(std::unique_ptr<AST> & functionName) {
+        std::unique_ptr<ASTCall> call{new ASTCall{pop(), std::move(functionName)}};
+        if (top() != Symbol::ParClose) {
+            call->args.push_back(EXPR());
+            while (condPop(Symbol::Comma))
+                call->args.push_back(EXPR());
+        }
+        pop(Symbol::ParClose);
+        return call;
+    }
+
     /* E_CALL_INDEX_MEMBER_POST := F { E_CALL | E_INDEX | E_MEMBER | E_POST }
         E_CALL := '(' [ EXPR { ',' EXPR } ] ')'
         E_INDEX := '[' EXPR ']'
-        E_MEMBER := ('.' | '->') identifier
+        E_MEMBER := ('.' | '->') identifier { E_CALL }
         E_POST := '++' | '--'
         */
     std::unique_ptr<AST> Parser::E_CALL_INDEX_MEMBER_POST() {
         std::unique_ptr<AST> result{F()};
         while (true) {
             if (top() == Symbol::ParOpen) {
-                std::unique_ptr<ASTCall> call{new ASTCall{pop(), std::move(result)}};
-                if (top() != Symbol::ParClose) {
-                    call->args.push_back(EXPR());
-                    while (condPop(Symbol::Comma))
-                        call->args.push_back(EXPR());
-                }
-                pop(Symbol::ParClose);
+                auto call = E_CALL(result);
                 result.reset(call.release());
             } else if (top() == Symbol::SquareOpen) {
                 Token const & op = pop();
@@ -551,10 +594,18 @@ namespace tinycpp {
                 pop(Symbol::SquareClose);
             } else if (top() == Symbol::Dot) {
                 Token const & op = pop();
-                result.reset(new ASTMember{op, std::move(result), pop(Token::Kind::Identifier).valueSymbol()});
+                std::unique_ptr<AST> memberName {IDENT().release()};
+                if (top() == Symbol::ParOpen) { // method call
+                    memberName = E_CALL(memberName);
+                }
+                result.reset(new ASTMember{op, std::move(result), std::move(memberName)});
             } else if (top() == Symbol::ArrowR) {
                 Token const & op = pop();
-                result.reset(new ASTMemberPtr{op, std::move(result), pop(Token::Kind::Identifier).valueSymbol()});
+                std::unique_ptr<AST> memberName {IDENT().release()};
+                if (top() == Symbol::ParOpen) { // method call
+                    memberName = E_CALL(memberName);
+                }
+                result.reset(new ASTMemberPtr{op, std::move(result), std::move(memberName)});
             } else if (top() == Symbol::Inc || top() == Symbol::Dec) {
                 Token const & op = pop();
                 result.reset(new ASTUnaryPostOp{op, std::move(result)});

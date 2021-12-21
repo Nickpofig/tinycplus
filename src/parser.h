@@ -12,13 +12,11 @@ namespace tinycpp {
     using ParserBase = tiny::ParserBase;
 
     namespace symbols {
-        static Symbol KwBase {"base"};
         static Symbol KwClass {"class"};
         static Symbol KwIs {"is"};
         static Symbol KwPrivate {"private"};
         static Symbol KwProtected {"protected"};
         static Symbol KwPublic {"public"};
-        static Symbol KwThis {"this"};
         static Symbol KwTrait {"trait"};
 
         bool isKeyword(Symbol const & s);
@@ -26,16 +24,16 @@ namespace tinycpp {
 
     class Parser : public ParserBase {
     public:
-        static std::unique_ptr<ASTBase> ParseFile(std::string const & filename) {
+        static std::unique_ptr<AST> ParseFile(std::string const & filename) {
             Parser p{Lexer::TokenizeFile(filename)};
-            std::unique_ptr<ASTBase> result{p.PROGRAM()};
+            std::unique_ptr<AST> result{p.PROGRAM()};
             p.pop(Token::Kind::EoF);
             return result;
         }
 
-        static std::unique_ptr<ASTBase> Parse(std::string const & code, std::string const & filename) {
+        static std::unique_ptr<AST> Parse(std::string const & code, std::string const & filename) {
             Parser p{Lexer::Tokenize(code, filename)};
-            std::unique_ptr<ASTBase> result{p.REPL()};
+            std::unique_ptr<AST> result{p.REPL()};
             p.pop(Token::Kind::EoF);
             return result;
         }
@@ -157,9 +155,11 @@ namespace tinycpp {
         std::unique_ptr<ASTType> TYPE_FUN_RET();
         std::unique_ptr<ASTStructDecl> STRUCT_DECL();
         std::unique_ptr<ASTFunPtrDecl> FUNPTR_DECL();
+        std::unique_ptr<ASTClassDecl> CLASS_DECL();
         std::unique_ptr<AST> EXPR_OR_VAR_DECL();
         std::unique_ptr<ASTVarDecl> VAR_DECL();
         std::unique_ptr<AST> VAR_DECLS();
+        std::unique_ptr<AST> FUN_OR_VAR_DECL();
         std::unique_ptr<AST> EXPR();
         std::unique_ptr<AST> EXPRS();
         std::unique_ptr<AST> E9();
@@ -172,6 +172,7 @@ namespace tinycpp {
         std::unique_ptr<AST> E2();
         std::unique_ptr<AST> E1();
         std::unique_ptr<AST> E_UNARY_PRE();
+        std::unique_ptr<AST> E_CALL(std::unique_ptr<AST> & functionName);
         std::unique_ptr<AST> E_CALL_INDEX_MEMBER_POST();
         std::unique_ptr<AST> F();
         std::unique_ptr<ASTIdentifier> IDENT();
