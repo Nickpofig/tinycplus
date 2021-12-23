@@ -92,7 +92,6 @@ namespace tinycpp {
 
     void TypeChecker::visit(ASTBlock * ast) { 
         enterBlockContext();
-        ast->setType(space_.getTypeVoid()); // default result type of a block is void
         auto * t = space_.getTypeVoid();
         for (auto & i : ast->body) {
             auto * tt = visitChild(i);
@@ -100,6 +99,10 @@ namespace tinycpp {
                 t = tt;
                 ast->setType(t);
             }
+        }
+        // Sets default result type of a block as void if non other type has been set
+        if (ast->getType() == nullptr) {
+            ast->setType(space_.getTypeVoid());
         }
         leaveContext();
     }
@@ -197,6 +200,10 @@ namespace tinycpp {
             throw ParserError{STR("Type " << ast->name.name() << " already fully defined"), ast->location()};
         }
         ast->setType(type);
+        if (ast->baseClass) {
+            auto * baseType = visitChild(ast->baseClass);
+            type->setBase(baseType);
+        }
         type->updateDefinition(ast);
         if (ast->isDefinition) {
             for (auto & i : ast->fields) {

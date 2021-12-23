@@ -1,5 +1,8 @@
 #pragma once
 
+// standard
+#include <cassert>
+
 // external
 #include "common/symbol.h"
 
@@ -185,7 +188,7 @@ namespace tinycpp {
             members_.insert(std::make_pair(name, type));
         }
 
-        Type * getMemberType(Symbol name) const {
+        virtual Type * getMemberType(Symbol name) const {
             auto it = members_.find(name);
             return it == members_.end() ? nullptr : it->second;
         }
@@ -232,12 +235,15 @@ namespace tinycpp {
         Keeps a mapping from the fields and methods to their types and the AST where the type was declared.
      */
     class Type::Class : public Type::Complex {
+    private:
+        ASTClassDecl * ast_;
+        Type::Class * base_ = nullptr; 
     public:
         Class(ASTClassDecl * ast):
             ast_{ast} {
         }
     public:
-        ASTClassDecl const * ast() const {
+        ASTClassDecl * ast() const {
             return ast_;
         }
 
@@ -247,9 +253,30 @@ namespace tinycpp {
             return ast_ != nullptr && ast_->isDefinition;
         }
 
+        Type::Class * getBase() {
+            return base_;
+        }
+
+        void setBase(Type * type) {
+            base_ = dynamic_cast<Type::Class *>(type);
+            if (!base_) {
+                throw std::runtime_error(STR("[T1] A type: " << (type ? type->toString() : "null") 
+                    << " - is not an instance of class type.")
+                );
+            }
+        }
+
         void updateDefinition(ASTClassDecl * ast) {
             assert(ast_ == nullptr || ! ast_->isDefinition);
             ast_ = ast;
+        }
+
+        Type * getMemberType(Symbol name) const override {
+            auto * type = Type::Complex::getMemberType(name);
+            if (!type) {
+                type = base_->getMemberType(name);
+            }
+            return type;
         }
 
     private:
@@ -258,8 +285,6 @@ namespace tinycpp {
         void toStream(std::ostream & s) const override {
             s << ast_->name.name();
         }
-
-        ASTClassDecl * ast_;
     }; // tinycpp::Type::Class
 
 

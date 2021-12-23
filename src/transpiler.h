@@ -14,6 +14,7 @@ namespace tinycpp {
     private: // persistant data
         ASTPrettyPrinter printer_;
         bool isPrintColorful_ = false;
+        int inheritanceDepth = 0;
     public:
         Transpiler(std::ostream & output, bool isColorful)
             :printer_{output}

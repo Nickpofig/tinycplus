@@ -6,6 +6,8 @@
 
 namespace tinycpp {
 
+    /// TODO: enforce use of "this" keyword or somehow define that a variable exist in a context of a transpiled tinyc code
+
     void Transpiler::visit(AST * ast) {
          visitChild(ast);
     }
@@ -160,24 +162,40 @@ namespace tinycpp {
     }
 
     void Transpiler::visit(ASTClassDecl * ast) {
-        printKeyword("struct ");
-        printIdentifier(ast->name.name());
+        bool isProcessingSelf = inheritanceDepth == 0;
+        if (isProcessingSelf) {
+            printKeyword("struct ");
+            printIdentifier(ast->name.name());
+        }
         if (ast->isDefinition) {
             // * class fields
-            printSymbols("{");
-            printer_.indent();
+            if (isProcessingSelf) {
+                printSymbols("{");
+                printer_.indent();
+            }
+            if (ast->baseClass) {
+                inheritanceDepth++;
+                // ASTPrettyPrinter dbg {std::cerr};
+                // dbg.newline();
+                // dbg << "[Debug] base class type is: " << 
+                auto * baseClassType = dynamic_cast<Type::Class *>(ast->baseClass->getType());
+                visit(baseClassType->ast());
+                inheritanceDepth--;
+            }
             for (auto & i : ast->fields) {
                 printer_.newline();
                 visitChild(i.get());
                 printSymbols(";");
             }
-            printer_.dedent();
-            printer_.newline();
-            printSymbols("};");
-            // * class methods
-            for (auto & i : ast->methods) {
+            if (isProcessingSelf) {
+                printer_.dedent();
                 printer_.newline();
-                visitChild(i.get());
+                printSymbols("};");
+                // * class methods
+                for (auto & i : ast->methods) {
+                    printer_.newline();
+                    visitChild(i.get());
+                }
             }
         }
     }
@@ -272,7 +290,8 @@ namespace tinycpp {
     }
 
     void Transpiler::visit(ASTReturn * ast) {
-        printKeyword("retunr");
+        printKeyword("return ");
+        visitChild(ast->value.get());
     }
 
     void Transpiler::visit(ASTBinaryOp * ast) {
@@ -339,9 +358,13 @@ namespace tinycpp {
         visitChild(ast->function.get());
         printSymbols("(");
         if (methodType) { // ..moves method call target to a position of functions's first argument
-            auto * parent = ast->findParent<ASTMember>();
-            visitChild(parent->base.get());
-            printSymbols(", ");
+            auto * member = ast->findParent<ASTMember>();
+            if (member->op == Symbol::Dot) {
+                printSymbols("&");
+            }
+            /// TODO: check result type of the base to be the exact host type of the member call
+            visitChild(member->base.get());
+            if (ast->args.size() > 0) printSymbols(", ");
         }
         auto i = ast->args.begin();
         if (i != ast->args.end()) {

@@ -429,7 +429,7 @@ namespace tinycpp {
     class ASTClassDecl : public AST {
     public:
         Symbol name;
-        std::unique_ptr<ASTIdentifier> baseClass;
+        std::unique_ptr<ASTType> baseClass;
         std::vector<std::unique_ptr<ASTVarDecl>> fields;
         std::vector<std::unique_ptr<ASTFunDecl>> methods;
 

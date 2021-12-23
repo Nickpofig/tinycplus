@@ -337,7 +337,7 @@ namespace tinycpp {
         addTypeName(classDecl->name);
         // Parses base class
         if (condPop(Symbol::Colon)) {
-            classDecl->baseClass = IDENT();
+            classDecl->baseClass = TYPE();
         }
         // Parses body
         if (condPop(Symbol::CurlyOpen)) {
