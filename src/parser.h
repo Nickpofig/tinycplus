@@ -1,21 +1,13 @@
 #pragma once
 
+// standard
 #include <unordered_set>
 
-#include "common/parser.h"
-
+// internal
+#include "shared.h"
 #include "ast.h"
 
 namespace tinycpp {
-
-    using Lexer = tiny::Lexer;
-    using ParserBase = tiny::ParserBase;
-
-    namespace symbols {
-        static Symbol KwClass {"class"};
-
-        bool isKeyword(Symbol const & s);
-    } // namespace symbols
 
     class Parser : public ParserBase {
     public:
@@ -62,7 +54,7 @@ namespace tinycpp {
                 || t == Symbol::KwVoid
                 || t == Symbol::KwWhile
                 // tinycpp keywords
-                || symbols::isKeyword(t.valueSymbol());
+                || symbols::isParsebleKeyword(t.valueSymbol());
         }
 
         /** Determines if given token is a valid user identifier.

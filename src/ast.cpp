@@ -10,4 +10,4 @@ namespace tinycpp {
         return false;
     }
 
-}
+} // namespace tinycpp

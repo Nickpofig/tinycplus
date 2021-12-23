@@ -1,46 +1,23 @@
 #pragma once
 
+// standard
 #include <unordered_map>
 #include <memory>
+#include <optional>
 
-#include "common/helpers.h"
-#include "common/ast.h"
-#include "common/lexer.h"
-#include "common/symbol.h"
+// internal
+#include "shared.h"
 
 namespace tinycpp {
     class Type;
-
-    using Token = tiny::Token;
-    using Symbol = tiny::Symbol;
-    using ParserError = tiny::ParserError;
-    using ASTBase = tiny::ASTBase;
-    using ASTPrettyPrinter = tiny::ASTPrettyPrinter;
-
     class ASTVisitor;
 
+    // AST custom user Data support
+
     class AST : public ASTBase {
+    protected:
+        AST(Token const & t): ASTBase{t} { }
     public:
-
-        /** Returns the backend type of the AST expression.
-            After a successful type checking this must never be nullptr.
-         */
-        Type * type() const {
-            return type_;
-        }
-
-        /** Sets the type for the expression in the AST node. 
-         
-            The type must *not* be nullptr. Setting type twice is an error unless the type is identical.
-         */
-        void setType(Type * t) {
-            if (t == nullptr)
-                throw ParserError("Incorrect types", location());
-            if (type_ != nullptr && type_ != t)
-                throw ParserError("Different type already set", location());
-            type_ = t;
-        }
-
         /** Returns true if the result of the expression has an address.
             A bit simplified version of l-values from C++. This is important for two things:
             1) an address (ASTAddress) can only be obtained of expressions that have address themselves.
@@ -50,16 +27,51 @@ namespace tinycpp {
             return false;
         }
 
-    protected:
-
-        friend class ASTVisitor;
-
-        AST(Token const & t):
-            ASTBase{t} {
+    // [*] Hierarchy information
+    public: // data
+        AST * parentAST = nullptr;
+        template<typename T>
+        T * findParent(std::optional<int> depth = std::nullopt) {
+            if (parentAST == nullptr) return nullptr;
+            if (auto result = dynamic_cast<T*>(parentAST)) return result;
+            if (depth.has_value()) {
+                if (depth.value() > 0) return parentAST->findParent<T>(depth.value() - 1);
+                else return nullptr;
+            }
+            return parentAST->findParent<T>();
         }
 
-        Type * type_ = nullptr;
+        bool isDescendentOf(AST * ancestor) {
+            if (this == ancestor) return true;
+            if (parentAST != nullptr) return parentAST->isDescendentOf(ancestor);
+            return false;
+        }
 
+    // [*] Type information
+    private:
+        Type * type_ = nullptr;
+    public: // methods
+        /** Returns the backend type of the AST expression.
+            After a successful type checking this must never be nullptr.
+        */
+        Type * getType() const {
+            return type_;
+        }
+        /** Sets the type for the expression in the AST node. 
+            The type must *not* be nullptr. Setting type twice is an error unless the type is identical.
+        */
+        void setType(Type * t) {
+            if (t == nullptr)
+                throw ParserError("Incorrect types", location());
+            if (type_ != nullptr && type_ != t)
+                throw ParserError("Different type already set", location());
+            type_ = t;
+        }
+
+
+    // [*] AST Visitor support
+    protected:
+        friend class ASTVisitor;
         virtual void accept(ASTVisitor * v) = 0;
     };
 
@@ -843,11 +855,13 @@ namespace tinycpp {
 
     class ASTMember : public AST {
     public:
+        const Symbol op;
         std::unique_ptr<AST> base;
         std::unique_ptr<AST> member;
 
         ASTMember(Token const & t, std::unique_ptr<AST> base, std::unique_ptr<AST> member):
             AST{t},
+            op{t.valueSymbol()},
             base{std::move(base)},
             member{std::move(member)} {
         }
@@ -859,33 +873,7 @@ namespace tinycpp {
         }
 
         void print(ASTPrettyPrinter & p) const override {
-            p << *base << p.symbol << "." << p.identifier << *member;
-        }
-
-    protected:
-        void accept(ASTVisitor * v) override;
-
-    };
-
-    class ASTMemberPtr : public AST {
-    public:
-        std::unique_ptr<AST> base;
-        std::unique_ptr<AST> member;
-
-        ASTMemberPtr(Token const & t, std::unique_ptr<AST> base, std::unique_ptr<AST> member):
-            AST{t},
-            base{std::move(base)},
-            member{std::move(member)} {
-        }
-
-        /** Since member of pointer's rhs must have an adrress (it's a pointer), the element must have address as well.
-         */
-        bool hasAddress() const override {
-            return true;
-        }
-
-        void print(ASTPrettyPrinter & p) const override {
-            p << *base << p.symbol << "->" << p.identifier << *member;
+            p << *base << p.symbol << op.name() << p.identifier << *member;
         }
 
     protected:
@@ -983,7 +971,6 @@ namespace tinycpp {
         virtual void visit(ASTDeref * ast) = 0;
         virtual void visit(ASTIndex * ast) = 0;
         virtual void visit(ASTMember * ast) = 0;
-        virtual void visit(ASTMemberPtr * ast) = 0;
         virtual void visit(ASTCall * ast) = 0;
         virtual void visit(ASTCast * ast) = 0;
 
@@ -1028,7 +1015,6 @@ namespace tinycpp {
     inline void ASTDeref::accept(ASTVisitor * v) { v->visit(this); }
     inline void ASTIndex::accept(ASTVisitor * v) { v->visit(this); }
     inline void ASTMember::accept(ASTVisitor * v) { v->visit(this); }
-    inline void ASTMemberPtr::accept(ASTVisitor * v) { v->visit(this); }
     inline void ASTCall::accept(ASTVisitor * v) { v->visit(this); }
     inline void ASTCast::accept(ASTVisitor * v) { v->visit(this); }
 

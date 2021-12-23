@@ -10,6 +10,8 @@
 // internal
 #include "parser.h"
 #include "transpiler.h"
+#include "typechecker.h"
+#include "astparenter.h"
 
 namespace program_errors {
     const std::string no_input = "[E1] input filepath is not given";
@@ -25,9 +27,14 @@ int main(int argc, char ** argv) {
         throw std::runtime_error(program_errors::no_input);
     }
     try {
-        tinycpp::TranspilerASTVisiter transplier{std::cout, isPrintColorful};
+        tinycpp::TypesSpace typesspace{};
+        tinycpp::TypeChecker typechecker{typesspace};
+        tinycpp::ASTParenter astparenter{};
+        tinycpp::Transpiler transpiler{std::cout, isPrintColorful};
         auto program = tinycpp::Parser::ParseFile(inputFilepath);
-        transplier.visit(program.get());
+        astparenter.visit(program.get());
+        typechecker.visit(program.get());
+        transpiler.visit(program.get());
     } catch (tiny::ParserError & parseError) {
         std::cerr << "[error] " << parseError.what() << " in \""<< parseError.location().file() << "\"" 
             << " at [" << parseError.location().line() 

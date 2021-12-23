@@ -2,7 +2,6 @@
 Transpiler from Object-Oriented extension TinyC+ to TinyC programming lamguage.
 
 # Language Reference
-# tinyC Language Reference
 
     PROGRAM := { FUN_DECL | VAR_DECLS ';' | STRUCT_DECL | FUNPTR_DECL }
 

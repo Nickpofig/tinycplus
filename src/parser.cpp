@@ -2,18 +2,6 @@
 
 namespace tinycpp {
 
-    namespace symbols {
-        bool isKeyword(Symbol const & s) {
-            return false
-                || s == KwClass
-                // || s == KwIs
-                // || s == KwPrivate
-                // || s == KwProtected
-                // || s == KwPublic
-                ;
-        }
-    }
-
     bool Parser::isTypeName(Symbol name) const {
         if (possibleTypes_.find(name) != possibleTypes_.end())
             return true;
@@ -402,8 +390,9 @@ namespace tinycpp {
             // now we have to update the type
             decl->type.reset(new ASTArrayType{start, std::move(decl->type), std::move(index) });
         }
-        if (condPop(Symbol::Assign))
+        if (condPop(Symbol::Assign)) {
             decl->value = EXPR();
+        }
         return decl;
     }
 
@@ -587,20 +576,13 @@ namespace tinycpp {
                 Token const & op = pop();
                 result.reset(new ASTIndex{op, std::move(result), EXPR()});
                 pop(Symbol::SquareClose);
-            } else if (top() == Symbol::Dot) {
+            } else if (top() == Symbol::Dot || top() == Symbol::ArrowR) {
                 Token const & op = pop();
                 std::unique_ptr<AST> memberName {IDENT().release()};
                 if (top() == Symbol::ParOpen) { // method call
                     memberName = E_CALL(memberName);
                 }
                 result.reset(new ASTMember{op, std::move(result), std::move(memberName)});
-            } else if (top() == Symbol::ArrowR) {
-                Token const & op = pop();
-                std::unique_ptr<AST> memberName {IDENT().release()};
-                if (top() == Symbol::ParOpen) { // method call
-                    memberName = E_CALL(memberName);
-                }
-                result.reset(new ASTMemberPtr{op, std::move(result), std::move(memberName)});
             } else if (top() == Symbol::Inc || top() == Symbol::Dec) {
                 Token const & op = pop();
                 result.reset(new ASTUnaryPostOp{op, std::move(result)});
@@ -634,6 +616,9 @@ namespace tinycpp {
             return std::unique_ptr<AST>{new ASTCast{op, std::move(expr), std::move(type)}};
         } else if (top() == Token::Kind::Identifier) {
             return IDENT();
+        } else if (condPop(Symbol::ParOpen)) {
+            return EXPR();
+            pop(Symbol::ParClose);
         } else {
             throw ParserError(STR("Expected literal, (expr) or cast, but " << top() << " found"), top().location(), eof());
         }
