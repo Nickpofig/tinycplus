@@ -273,7 +273,7 @@ namespace tinycpp {
 
         Type * getMemberType(Symbol name) const override {
             auto * type = Type::Complex::getMemberType(name);
-            if (!type) {
+            if (type == nullptr && base_ != nullptr) {
                 type = base_->getMemberType(name);
             }
             return type;

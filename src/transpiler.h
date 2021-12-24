@@ -21,31 +21,24 @@ namespace tinycpp {
             ,isPrintColorful_{isColorful}
         { }
     private:
-        void printSymbols(std::string const & text) {
-            if (isPrintColorful_) printer_ << printer_.symbol;
-            printer_ << text;
+        inline void print(Symbol const & symbol, tiny::color color) {
+            if (isPrintColorful_) printer_ << color;
+            printer_ << symbol.name();
         }
-        void printIdentifier(std::string const & text) {
-            if (isPrintColorful_) printer_ << printer_.identifier;
-            printer_ << text;
-        }
-        void printType(std::string const & text) {
-            if (isPrintColorful_) printer_ << printer_.type;
-            printer_ << text;
-        }
-        void printKeyword(std::string const & text) {
-            if (isPrintColorful_) printer_ << printer_.keyword;
-            printer_ << text;
-        }
+        void printSpace() { printer_ << " "; }
+        void printSymbol(Symbol const & name) { print(name, printer_.symbol);}
+        void printIdentifier(Symbol const & name) { print(name, printer_.identifier); }
+        void printType(Symbol const & name) { print(name, printer_.type); }
+        void printKeyword(Symbol const & name) { print(name, printer_.keyword); }
         void printNumber(int64_t value) {
             if (isPrintColorful_) printer_ << printer_.numberLiteral;
             printer_ << value;
         }
-        void printClassPrefix(Type const * classType, tiny::color color) {
+        void printClassPrefix(Type const * classType) {
             if (dynamic_cast<Type::Class const *>(classType) == nullptr) {
                 throw std::runtime_error{STR("Expected class type, but got: " << classType->toString() << " type.")};
             }
-            if (isPrintColorful_) printer_ << color;
+            if (isPrintColorful_) printer_ << printer_.identifier;
             printer_ << classType->toString() << "_";
         }
     public:

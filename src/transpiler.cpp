@@ -22,7 +22,7 @@ namespace tinycpp {
 
     void Transpiler::visit(ASTChar * ast) {
         if (isPrintColorful_) printer_ << printer_.charLiteral;
-        printer_ << '\'' << ast->value << '\'';
+        printer_ << STR('\'' << ast->value << '\'');
     }
 
     void Transpiler::visit(ASTString * ast) {
@@ -31,8 +31,7 @@ namespace tinycpp {
     }
 
     void Transpiler::visit(ASTIdentifier * ast) {
-        if (isPrintColorful_) printer_ << printer_.identifier;
-        printer_ << ast->name.name();
+        printIdentifier(ast->name);
     }
 
     void Transpiler::visit(ASTType * ast) {
@@ -41,14 +40,14 @@ namespace tinycpp {
 
     void Transpiler::visit(ASTPointerType * ast) {
         visitChild(ast->base.get());
-        printSymbols("*");
+        printSymbol(Symbol::Mul);
     }
 
     void Transpiler::visit(ASTArrayType * ast) {
         visitChild(ast->base.get());
-        printSymbols("[");
+        printSymbol(Symbol::SquareOpen);
         visitChild(ast->size.get());
-        printSymbols("]");
+        printSymbol(Symbol::SquareClose);
     }
 
     void Transpiler::visit(ASTNamedType * ast) {
@@ -60,7 +59,8 @@ namespace tinycpp {
         if (i != ast->body.end()) {
             visitChild(i[0].get()); // visits sequence element
             while (++i != ast->body.end()) {
-                printSymbols(", ");
+                printSymbol(Symbol::Comma);
+                printSpace();
                 visitChild(i[0].get()); // visits sequence element
             }
         }
@@ -68,20 +68,20 @@ namespace tinycpp {
 
     void Transpiler::visit(ASTBlock * ast) {
         if (ast->parentAST) { // ..when not the root context
-            printSymbols("{");
+            printSymbol(Symbol::CurlyOpen);
             printer_.indent();
         }
         for (auto & i : ast->body) {
             printer_.newline();
             visitChild(i.get());
             if (ast->parentAST != nullptr && !dynamic_cast<ASTFunDecl *>(i.get())) {
-                printSymbols(";");
+                printSymbol(Symbol::Semicolon);
             }
         }
         if (ast->parentAST) { // ..when not the root context
             printer_.dedent();
             printer_.newline();
-            printSymbols("}");
+            printSymbol(Symbol::CurlyClose);
         }
         printer_.newline();
     }
@@ -90,23 +90,25 @@ namespace tinycpp {
         if (auto arrayType = dynamic_cast<ASTArrayType*>(ast->type.get())) {
             // base type part
             visitChild(arrayType->base.get());
-            printer_ << " ";
+            printSpace();
             // variable name
             visitChild(ast->name.get());
             // array type part
-            printSymbols("[");
+            printSymbol(Symbol::SquareOpen);
             visitChild(arrayType->size.get());
-            printSymbols("]");
+            printSymbol(Symbol::SquareClose);
         } else {
             // base type part
             visitChild(ast->type.get());
-            printer_ << " ";
+            printSpace();
             // variable name
             visitChild(ast->name.get());
         }
         // immediate value assignment
         if (ast->value.get() != nullptr) {
-            printSymbols(" = ");
+            printSpace();
+            printSymbol(Symbol::Assign);
+            printSpace();
             visitChild(ast->value.get());
         }
     }
@@ -115,69 +117,72 @@ namespace tinycpp {
         auto * classParent = ast->findParent<ASTClassDecl>();
         // * method return type
         visitChild(ast->typeDecl.get());
-        printer_ << " ";
+        printSpace();
         // * method name
         if (classParent) { // ..inserts class name at the beginning
-            printClassPrefix(classParent->getType(), printer_.identifier);
+            printClassPrefix(classParent->getType());
         }
         printIdentifier(ast->name.name());
         // * method arguments
-        printSymbols("(");
+        printSymbol(Symbol::ParOpen);
         if (classParent) { // ..inserts pointer to the owner class as the first argument
             printType(classParent->name.name());
-            printSymbols("* ");
-            printIdentifier("this");
+            printSymbol(Symbol::Mul);
+            printSpace();
+            printIdentifier(symbols::KwThis);
             if (ast->args.size() > 0) {
-                printSymbols(", ");
+                printSymbol(Symbol::Colon);
+                printSpace();
             }
         }
         auto arg = ast->args.begin();
         if (arg != ast->args.end()) {
             visitChild(arg[0].get());
             while (++arg != ast->args.end()) {
-                printSymbols(", ");
+                printSymbol(Symbol::Colon);
+                printSpace();
                 visitChild(arg[0].get());
             }
         }
-        printSymbols(")");
+        printSymbol(Symbol::ParClose);
         // * method body
         visitChild(ast->body.get());
     }
 
     void Transpiler::visit(ASTStructDecl * ast) {
-        printKeyword("struct ");
+        printKeyword(Symbol::KwStruct);
+        printSpace();
         printIdentifier(ast->name.name());
         if (ast->isDefinition) {
-            printSymbols("{");
+            printSymbol(Symbol::CurlyOpen);
             printer_.indent();
             for (auto & i : ast->fields) {
                 printer_.newline();
                 visitChild(i.get());
-                printSymbols(";");
+                printSymbol(Symbol::Semicolon);
             }
             printer_.dedent();
             printer_.newline();
-            printSymbols("};");
+            printSymbol(Symbol::CurlyClose);
+            printSymbol(Symbol::Semicolon);
         }
     }
 
     void Transpiler::visit(ASTClassDecl * ast) {
         bool isProcessingSelf = inheritanceDepth == 0;
         if (isProcessingSelf) {
-            printKeyword("struct ");
+            printKeyword(Symbol::KwStruct);
+            printSpace();
             printIdentifier(ast->name.name());
         }
         if (ast->isDefinition) {
             // * class fields
             if (isProcessingSelf) {
-                printSymbols("{");
+                printSymbol(Symbol::CurlyOpen);
                 printer_.indent();
             }
             if (ast->baseClass) {
-                inheritanceDepth++;
-                // ASTPrettyPrinter dbg {std::cerr};
-                // dbg.newline();
-                // dbg << "[Debug] base class type is: " << 
+                inheritanceDepth++; 
                 auto * baseClassType = dynamic_cast<Type::Class *>(ast->baseClass->getType());
                 visit(baseClassType->ast());
                 inheritanceDepth--;
@@ -185,12 +190,13 @@ namespace tinycpp {
             for (auto & i : ast->fields) {
                 printer_.newline();
                 visitChild(i.get());
-                printSymbols(";");
+                printSymbol(Symbol::Semicolon);
             }
             if (isProcessingSelf) {
                 printer_.dedent();
                 printer_.newline();
-                printSymbols("};");
+                printSymbol(Symbol::CurlyClose);
+                printSymbol(Symbol::Semicolon);
                 // * class methods
                 for (auto & i : ast->methods) {
                     printer_.newline();
@@ -201,140 +207,167 @@ namespace tinycpp {
     }
 
     void Transpiler::visit(ASTFunPtrDecl * ast) {
-        printKeyword("typedef ");
+        printKeyword(Symbol::KwTypedef);
+        // return type
+        printSpace();
         visitChild(ast->returnType.get());
-        printSymbols("( *");
+        // name as pointer
+        printSymbol(Symbol::ParOpen);
+        printSpace();
+        printSymbol(Symbol::Mul);
         visitChild(ast->name.get());
-        printSymbols(")(");
+        printSymbol(Symbol::ParClose);
+        // arguments
+        printSymbol(Symbol::ParOpen);
         auto i = ast->args.begin();
         if (i != ast->args.end()) {
             visitChild(i[0].get());
             while (++i != ast->args.end())
-                printSymbols(", ");
+                printSymbol(Symbol::Colon);
+                printSpace();
                 visitChild(i[0].get());
         }
-        printSymbols(")");
+        printSymbol(Symbol::ParClose);
     }
 
     void Transpiler::visit(ASTIf * ast) {
-        printKeyword("if ");
-        printSymbols("(");
+        // keyword
+        printKeyword(Symbol::KwIf);
+        printSpace();
+        // condition
+        printSymbol(Symbol::ParOpen);
         visitChild(ast->cond.get());
-        printSymbols(")");
+        printSymbol(Symbol::ParClose);
+        // true case body
         visitChild(ast->trueCase.get());
+        // false case body
         if (ast->falseCase.get() != nullptr) {
-            printKeyword("else");
+            printKeyword(Symbol::KwElse);
             visitChild(ast->falseCase.get());
         }
     }
 
     void Transpiler::visit(ASTSwitch * ast) {
-        printKeyword("switch ");
-        printSymbols("(");
+        // keyword
+        printKeyword(Symbol::KwSwitch);
+        // expression/condition
+        printSpace();
+        printSymbol(Symbol::ParOpen);
         visitChild(ast->cond.get());
-        printSymbols(") {");
+        printSymbol(Symbol::ParClose);
+        // body
+        printSpace();
+        printSymbol(Symbol::CurlyOpen);
         printer_.indent();
         for (auto & i : ast->cases) {
             printer_.newline();
-            printKeyword("case ");
+            // case keyword
+            printKeyword(Symbol::KwCase);
+            printSpace();
+            // case constant
             printNumber(i.first);
-            printSymbols(":");
+            // case body
+            printSymbol(Symbol::Colon);
             visitChild(i.second.get());
         }
         if (ast->defaultCase.get() != nullptr) {
             printer_.newline();
-            printKeyword("default");
-            printSymbols(":");
+            printKeyword(Symbol::KwDefault);
+            printSymbol(Symbol::Colon);
             visitChild(ast->defaultCase.get());
         }
         printer_.dedent();
         printer_.newline();
-        printSymbols("}");
+        printSymbol(Symbol::CurlyClose);
     }
 
     void Transpiler::visit(ASTWhile * ast) {
-        printKeyword("while ");
-        printSymbols("(");
+        printKeyword(Symbol::KwWhile);
+        printSpace();
+        printSymbol(Symbol::ParOpen);
         visitChild(ast->cond.get());
-        printSymbols(")");
+        printSymbol(Symbol::ParClose);
         visitChild(ast->body.get());
     }
 
     void Transpiler::visit(ASTDoWhile * ast) {
-        printKeyword("do");
+        printKeyword(Symbol::KwDo);
         visitChild(ast->body.get());
-        printKeyword("while ");
-        printSymbols("(");
+        printKeyword(Symbol::KwWhile);
+        printSpace();
+        printSymbol(Symbol::ParOpen);
         visitChild(ast->cond.get());
-        printSymbols(")");
+        printSymbol(Symbol::ParClose);
     }
 
     void Transpiler::visit(ASTFor * ast) {
-        printKeyword("for ");
-        printSymbols("(");
+        printKeyword(Symbol::KwFor);
+        printSpace();
+        printSymbol(Symbol::ParOpen);
         visitChild(ast->init.get());
-        printSymbols(";");
+        printSymbol(Symbol::Semicolon);
         visitChild(ast->cond.get());
-        printSymbols(";");
+        printSymbol(Symbol::Semicolon);
         visitChild(ast->increment.get());
-        printSymbols(")");
+        printSymbol(Symbol::ParClose);
         visitChild(ast->body.get());
     }
 
     void Transpiler::visit(ASTBreak * ast) {
-        printKeyword("break");
+        printKeyword(Symbol::KwBreak);
     }
 
     void Transpiler::visit(ASTContinue * ast) {
-        printKeyword("continue");
+        printKeyword(Symbol::KwContinue);
     }
 
     void Transpiler::visit(ASTReturn * ast) {
-        printKeyword("return ");
+        printKeyword(Symbol::KwReturn);
+        printSpace();
         visitChild(ast->value.get());
     }
 
     void Transpiler::visit(ASTBinaryOp * ast) {
         visitChild(ast->left.get());
-        printer_ << " ";
-        printSymbols(ast->op.name());
-        printer_ << " ";
+        printSpace();
+        printSymbol(ast->op.name());
+        printSpace();
         visitChild(ast->right.get());
     }
 
     void Transpiler::visit(ASTAssignment * ast) {
         visitChild(ast->lvalue.get()); 
-        printer_ << " ";
-        printSymbols(ast->op.name());
-        printer_ << " ";
+        printSpace();
+        printSymbol(ast->op.name());
+        printSpace();
         visitChild(ast->value.get());
     }
 
     void Transpiler::visit(ASTUnaryOp * ast) {
-        printSymbols(ast->op.name());
+        printSymbol(ast->op.name());
         visitChild(ast->arg.get());
     }
 
     void Transpiler::visit(ASTUnaryPostOp * ast) {
         visitChild(ast->arg.get());
-        printSymbols(ast->op.name());
+        printSymbol(ast->op.name());
     }
 
     void Transpiler::visit(ASTAddress * ast) {
-        printSymbols("&");
+        printSymbol(Symbol::BitAnd);
         visitChild(ast->target.get());
     }
 
     void Transpiler::visit(ASTDeref * ast) {
-        printSymbols("*");
+        printSymbol(Symbol::Mul);
         visitChild(ast->target.get());
     }
 
     void Transpiler::visit(ASTIndex * ast) {
         visitChild(ast->base.get());
-        printSymbols("[");
+        printSymbol(Symbol::SquareOpen);
         visitChild(ast->index.get());
-        printSymbols("]");
+        printSymbol(Symbol::SquareClose);
     }
 
     void Transpiler::visit(ASTMember * ast) {
@@ -345,7 +378,7 @@ namespace tinycpp {
             visitChild(ast->member.get());
         } else { // variable access
             visitChild(ast->base.get());
-            printSymbols(ast->op.name());
+            printSymbol(ast->op.name());
             visitChild(ast->member.get());
         }
     }
@@ -353,48 +386,54 @@ namespace tinycpp {
     void Transpiler::visit(ASTCall * ast) {
         auto * methodType = dynamic_cast<Type::Method*>(ast->function->getType());
         if (methodType) {
-            printClassPrefix(methodType->classType, printer_.identifier);
+            printClassPrefix(methodType->classType);
         }
         visitChild(ast->function.get());
-        printSymbols("(");
+        printSymbol(Symbol::ParOpen);
         if (methodType) { // ..moves method call target to a position of functions's first argument
             auto * member = ast->findParent<ASTMember>();
             if (member->op == Symbol::Dot) {
-                printSymbols("&");
+                printSymbol(Symbol::BitAnd);
             }
             auto * baseType = member->base->getType();
             bool castIsRequired = baseType->getCore<Type::Complex>() != methodType->classType;
             if (castIsRequired) {
-                printKeyword("cast");
-                printSymbols("<");
+                printKeyword(Symbol::KwCast);
+                printSymbol(Symbol::Lt);
                 printType(methodType->classType->toString());
-                printType("*");
-                printSymbols(">(");
+                printType(Symbol::Mul);
+                printSymbol(Symbol::Gt);
+                printSymbol(Symbol::ParOpen);
             }
             visitChild(member->base.get());
             if (castIsRequired) {
-                printKeyword(")");
+                printSymbol(Symbol::ParClose);
             }
-            if (ast->args.size() > 0) printSymbols(", ");
+            if (ast->args.size() > 0) { 
+                printSymbol(Symbol::Colon);
+                printSpace();
+            }
         }
         auto i = ast->args.begin();
         if (i != ast->args.end()) {
             visitChild(i[0].get());
             while (++i != ast->args.end()) {
-                printSymbols(", ");
+                printSymbol(Symbol::Colon);
+                printSpace();
                 visitChild(i[0].get());
             }
         }
-        printSymbols(")");
+        printSymbol(Symbol::ParClose);
     }
 
     void Transpiler::visit(ASTCast * ast) {
-        printKeyword("cast");
-        printSymbols("<");
+        printKeyword(Symbol::KwCast);
+        printSymbol(Symbol::Lt);
         visitChild(ast->type.get());
-        printSymbols(">(");
+        printSymbol(Symbol::Gt);
+        printSymbol(Symbol::ParOpen);
         visitChild(ast->value.get());
-        printSymbols(")");
+        printSymbol(Symbol::ParClose);
     }
 
 } // namespace tinycpp
