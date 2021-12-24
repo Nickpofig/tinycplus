@@ -180,7 +180,7 @@ namespace tinycpp {
     private:
         std::unordered_map<Symbol, Type *> members_;
     public:
-        void registerMember(Symbol name, Type * type, AST * ast) {
+        virtual void registerMember(Symbol name, Type * type, AST * ast) {
             if (!type->isFullyDefined())
                 throw ParserError{STR("Member " << name.name() << " has not fully defined type " << type->toString()), ast->location()};
             if (members_.find(name) != members_.end())
@@ -269,6 +269,19 @@ namespace tinycpp {
         void updateDefinition(ASTClassDecl * ast) {
             assert(ast_ == nullptr || ! ast_->isDefinition);
             ast_ = ast;
+        }
+
+    public:
+        void registerMember(Symbol name, Type * type, AST * ast) override {
+            if (auto * type = getMemberType(name); type != nullptr) {
+                throw ParserError{
+                    STR("Member with name \"" << name.name() << "\""
+                        << " is declared the second time (which is not allowed!)"
+                        << " in class \"" << toString() << "\""),
+                    ast->location()
+                };
+            }
+            Type::Complex::registerMember(name, type, ast);
         }
 
         Type * getMemberType(Symbol name) const override {
