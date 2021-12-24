@@ -362,8 +362,19 @@ namespace tinycpp {
             if (member->op == Symbol::Dot) {
                 printSymbols("&");
             }
-            /// TODO: check result type of the base to be the exact host type of the member call
+            auto * baseType = member->base->getType();
+            bool castIsRequired = baseType->getCore<Type::Complex>() != methodType->classType;
+            if (castIsRequired) {
+                printKeyword("cast");
+                printSymbols("<");
+                printType(methodType->classType->toString());
+                printType("*");
+                printSymbols(">(");
+            }
             visitChild(member->base.get());
+            if (castIsRequired) {
+                printKeyword(")");
+            }
             if (ast->args.size() > 0) printSymbols(", ");
         }
         auto i = ast->args.begin();
