@@ -3,10 +3,8 @@
 // standard
 #include <cassert>
 
-// external
-#include "common/symbol.h"
-
 // internal
+#include "shared.h"
 #include "ast.h"
 
 namespace tinycpp {
@@ -41,6 +39,10 @@ namespace tinycpp {
          */
         virtual bool isFullyDefined() const {
             return true;
+        }
+
+        virtual bool isPointer() const {
+            return false;
         }
 
         template<typename T>
@@ -112,6 +114,10 @@ namespace tinycpp {
 
         Type * base() const {
             return base_;
+        }
+
+        bool isPointer() const override {
+            return true;
         }
 
     private:
@@ -211,7 +217,7 @@ namespace tinycpp {
         /** Struct type is fully defined if its ast the definition, not just forward declaration of the type.
          */
         bool isFullyDefined() const override {
-            return ast_->isDefinition;
+            return ast_ != nullptr && ast_->isDefinition;
         }
 
         void updateDefinition(ASTStructDecl * ast) {
@@ -329,7 +335,7 @@ namespace tinycpp {
 
 
     template<typename T>
-    T * Type::getCore() {
+    T * Type::getCore() { // [?] defined after everything in order to work with fully defined types
         if (auto asIs = dynamic_cast<T*>(this)) {
             return asIs;
         }
@@ -338,131 +344,4 @@ namespace tinycpp {
         }
         return nullptr;
     }
-
-
-    /** The TinyC+ program types infromation.
-     */
-    class TypesSpace {
-    private: // data
-        std::unordered_map<std::string, std::unique_ptr<Type>> types_;
-        Type * int_;
-        Type * double_;
-        Type * char_;
-        Type * void_;
-
-    public: // constructors
-        TypesSpace() {
-            int_ = types_.insert(std::make_pair(Symbol::KwInt.name(), std::unique_ptr<Type>{new Type::POD{Symbol::KwInt}})).first->second.get();
-            double_ = types_.insert(std::make_pair(Symbol::KwDouble.name(), std::unique_ptr<Type>{new Type::POD{Symbol::KwDouble}})).first->second.get();
-            char_ = types_.insert(std::make_pair(Symbol::KwChar.name(), std::unique_ptr<Type>{new Type::POD{Symbol::KwChar}})).first->second.get();
-            void_ = types_.insert(std::make_pair(Symbol::KwVoid.name(), std::unique_ptr<Type>{new Type::POD{Symbol::KwVoid}})).first->second.get();
-        }
-
-    public: // getters
-        Type * getTypeInt() const {
-            return int_;
-        }
-
-        Type * getTypeDouble() const {
-            return double_;
-        }
-
-        Type * getTypeChar() const {
-            return char_;
-        }
-
-        Type * getTypeVoid() const {
-            return void_;
-        }
-
-        Type * getType(Symbol symbol) const {
-            auto i = types_.find(symbol.name());
-            if (i == types_.end())
-                return nullptr;
-            Type * result = i->second.get();
-            // check if it is a type alias, and if so, return the base type
-            Type::Alias * alias = dynamic_cast<Type::Alias*>(result);
-            if (alias != nullptr)
-                return alias->base();
-            else
-                return result;
-        }
-
-        /** Determines whether given name is a known type name.
-            It's a typename if we find it in the type declarations.
-         */
-        bool isTypeName(Symbol name) const {
-            return getType(name) != nullptr;
-        }
-
-        bool isPointer(Type * t) const {
-            assert(dynamic_cast<Type::Alias const *>(t) == nullptr);
-            return dynamic_cast<Type::Pointer const *>(t) != nullptr;
-        }
-
-        bool isPOD(Type * t) const {
-            assert(dynamic_cast<Type::Alias const *>(t) == nullptr);
-            return t == char_ || t == int_ || t == double_;
-        }
-
-        bool convertsToBool(Type * t) const {
-            assert(dynamic_cast<Type::Alias const *>(t) == nullptr);
-            return isPointer(t) || isPOD(t);
-        }
-
-    public: // mutators
-        Type::Struct * getOrCreateStructType(Symbol name) {
-            // struct types can't have aliases
-            auto i = types_.find(name.name());
-            if (i == types_.end()) {
-                Type::Struct * result = new Type::Struct{nullptr};
-                types_.insert(std::make_pair(name.name(), std::unique_ptr<Type>{result}));
-                return result;
-            } else {
-                Type::Struct * result = dynamic_cast<Type::Struct*>(i->second.get());
-                return result;
-            }
-        }
-
-        Type::Class * getOrCreateClassType(Symbol name) {
-            // class types can't have aliases
-            auto i = types_.find(name.name());
-            if (i == types_.end()) {
-                auto * result = new Type::Class{nullptr};
-                types_.insert(std::make_pair(name.name(), std::unique_ptr<Type>{result}));
-                return result;
-            } else {
-                auto * result = dynamic_cast<Type::Class *>(i->second.get());
-                return result;
-            }
-        }
-
-        Type::Function * getOrCreateFunctionType(std::unique_ptr<Type::Function> type) {
-            std::string typeName = type->toString();
-            auto i = types_.find(typeName);
-            if (i == types_.end())
-                i = types_.insert(std::make_pair(typeName, type.release())).first;
-            Type::Function * result = dynamic_cast<Type::Function*>(i->second.get());
-            assert(result != nullptr && "The type existed, but was something else");
-            return result;
-        }
-
-        Type::Alias * createTypeAlias(Symbol name, Type * base) {
-            assert(types_.find(name.name()) == types_.end());
-            Type::Alias * result = new Type::Alias(name, base);
-            types_.insert(std::make_pair(name.name(), std::unique_ptr<Type>{ result }));
-            return result;
-        }
-
-        /** Returns a pointer type to the given base.
-         */
-        Type * getOrCreatePointerType(Type * base) {
-            std::string typeName = base->toString() + "*";
-            auto i = types_.find(typeName);
-            if (i == types_.end())
-                i = types_.insert(std::make_pair(typeName, std::unique_ptr<Type>(new Type::Pointer{base}))).first;
-            return i->second.get();
-        }
-    }; // tinycpp::TypesSpace
-
 } // namespace tinycpp

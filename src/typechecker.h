@@ -2,64 +2,69 @@
 
 // standard
 #include <string>
+#include <variant>
 
 // internal
 #include "ast.h"
 #include "types.h"
+#include "contexts.h"
 
 namespace tinycpp {
 
-    class TypesSpace;
-
     class TypeChecker : public ASTVisitor {
-    public:
-        TypeChecker(TypesSpace & space);
+    private: // data
+        NamesContext & names_;
+        TypesContext & types_;
 
+    private: // transpiler case configurations
+        struct Context {
+            struct Member {
+                Type::Complex * memberBaseType;
+            };
+            struct Complex {
+                Type::Complex * complexType;
+            };
+        };
+        std::vector<std::variant<
+            Context::Member,
+            Context::Complex
+        >> contextStack_;
+
+        template<typename T>
+        size_t push(T && context) {
+            contextStack_.push_back(context);
+            return contextStack_.size() - 1;
+        }
+
+        template<typename T>
+        std::optional<T> pop() {
+            if (contextStack_.size() > 0) {
+                auto context = contextStack_.back();
+                contextStack_.pop_back();
+                auto * result = std::get_if<T>(&context);
+                return result == nullptr 
+                    ? std::optional<T>{std::nullopt}
+                    : std::optional<T>{*result};
+            }
+            return std::nullopt;
+        }
+
+        void wipeContext(size_t position) {
+            if (position > contextStack_.size()) return;
+            contextStack_.erase(contextStack_.begin() + position, contextStack_.end());
+        }
+
+    public: // constructor
+        TypeChecker(TypesContext & types, NamesContext & names);
+
+    public: // helper methods
         Type * getArithmeticResult(Type * lhs, Type * rhs) const;
 
         /** If the given type is a function pointer, returns the corresponding function. Otherwise returns nullptr. 
          */
         Type::Function const * asFunctionType(Type * t);
 
-        void enterBlockContext() {
-            context_.push_back(Context{context_.back().returnType, {}});
-        }
-
-        void enterFunctionContext(Type * returnType) {
-            context_.push_back(Context{returnType, {}});
-        }
-
-        void leaveContext() {
-            context_.pop_back();
-        }
-
-        void addVariable(Symbol name, Type * type) {
-            context_.back().locals.insert(std::make_pair(name, type));
-        }
-
-        bool addGlobalVariable(Symbol name, Type * type) {
-            // check if the name already exists
-            if (context_.front().locals.find(name) != context_.front().locals.end())
-                return false;
-            context_.front().locals.insert(std::make_pair(name, type));
-            return true;
-        }
-
-        /** Returns the type of variable.
-         */
-        Type * getVariable(Symbol name) {
-            for (auto i = context_.rbegin(), e = context_.rend(); i != e; ++i) {
-                auto l = i->locals.find(name);
-                if (l != i->locals.end())
-                    return l->second;
-            }
-            return nullptr;
-        }
-
-        Type * currentReturnType() {
-            return context_.back().returnType;
-        }
-
+    public: // visitor implementation
         void visit(AST * ast) override;
         void visit(ASTInteger * ast) override;
         void visit(ASTDouble * ast) override;
@@ -96,7 +101,7 @@ namespace tinycpp {
         void visit(ASTCall * ast) override;
         void visit(ASTCast * ast) override;
 
-    protected:
+    protected: // shortcuts
         Type * visitChild(AST * ast) {
             ASTVisitor::visitChild(ast);
             return ast->getType();
@@ -106,15 +111,6 @@ namespace tinycpp {
         Type * visitChild(std::unique_ptr<T> const & ptr) {
             return visitChild(ptr.get());
         }
-
-    private:
-        struct Context {
-            Type * returnType;
-            std::unordered_map<Symbol, Type *> locals;
-        };
-
-        std::vector<Context> context_;
-        TypesSpace & space_;
 
     }; // tinyc::TypeChecker
 

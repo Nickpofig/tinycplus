@@ -7,17 +7,21 @@
 // internal
 #include "ast.h"
 #include "types.h"
+#include "contexts.h"
 
 namespace tinycpp {
 
     class Transpiler : public ASTVisitor {
     private: // persistant data
+        NamesContext & names_;
         ASTPrettyPrinter printer_;
         bool isPrintColorful_ = false;
+    private: // temporary data
         int inheritanceDepth = 0;
     public:
-        Transpiler(std::ostream & output, bool isColorful)
-            :printer_{output}
+        Transpiler(NamesContext & names, std::ostream & output, bool isColorful)
+            :names_{names}
+            ,printer_{output}
             ,isPrintColorful_{isColorful}
         { }
     private:

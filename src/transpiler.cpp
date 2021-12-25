@@ -131,7 +131,7 @@ namespace tinycpp {
             printSpace();
             printIdentifier(symbols::KwThis);
             if (ast->args.size() > 0) {
-                printSymbol(Symbol::Colon);
+                printSymbol(Symbol::Comma);
                 printSpace();
             }
         }
@@ -139,7 +139,7 @@ namespace tinycpp {
         if (arg != ast->args.end()) {
             visitChild(arg[0].get());
             while (++arg != ast->args.end()) {
-                printSymbol(Symbol::Colon);
+                printSymbol(Symbol::Comma);
                 printSpace();
                 visitChild(arg[0].get());
             }
@@ -223,7 +223,7 @@ namespace tinycpp {
         if (i != ast->args.end()) {
             visitChild(i[0].get());
             while (++i != ast->args.end())
-                printSymbol(Symbol::Colon);
+                printSymbol(Symbol::Comma);
                 printSpace();
                 visitChild(i[0].get());
         }
@@ -371,14 +371,14 @@ namespace tinycpp {
     }
 
     void Transpiler::visit(ASTMember * ast) {
-        if (auto call = dynamic_cast<ASTCall*>(ast->member.get())) { // method call
+        if (dynamic_cast<ASTCall*>(ast->member.get())) { // method call
             /// WARNING: function pointer is allowed only in root context,
             ///       however if it will change and data structures become allowed to use them
             ///       then a redesign must take place.
             visitChild(ast->member.get());
-        } else { // variable access
+        } else {
             visitChild(ast->base.get());
-            printSymbol(ast->op.name());
+            printSymbol(ast->op);
             visitChild(ast->member.get());
         }
     }
@@ -410,7 +410,7 @@ namespace tinycpp {
                 printSymbol(Symbol::ParClose);
             }
             if (ast->args.size() > 0) { 
-                printSymbol(Symbol::Colon);
+                printSymbol(Symbol::Comma);
                 printSpace();
             }
         }
@@ -418,7 +418,7 @@ namespace tinycpp {
         if (i != ast->args.end()) {
             visitChild(i[0].get());
             while (++i != ast->args.end()) {
-                printSymbol(Symbol::Colon);
+                printSymbol(Symbol::Comma);
                 printSpace();
                 visitChild(i[0].get());
             }
