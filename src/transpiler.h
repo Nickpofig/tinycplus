@@ -60,9 +60,10 @@ namespace tinycpp {
         void visit(ASTBlock * ast) override;
         void visit(ASTVarDecl * ast) override;
         void visit(ASTFunDecl * ast) override;
+        void visit(ASTFunPtrDecl * ast) override;
         void visit(ASTStructDecl * ast) override;
         void visit(ASTClassDecl * ast) override;
-        void visit(ASTFunPtrDecl * ast) override;
+        void visit(ASTMethodDecl * ast) override;
         void visit(ASTIf * ast) override;
         void visit(ASTSwitch * ast) override;
         void visit(ASTWhile * ast) override;

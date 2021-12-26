@@ -19,11 +19,14 @@ namespace tinycpp {
     using ParserBase = tiny::ParserBase;
 
     namespace symbols {
-        static Symbol KwClass {"class"};
-        static Symbol KwThis {"this"};
+        static Symbol KwClass {"class"}; // special data model representing an object.
+        static Symbol KwThis {"this"}; // compulsory first argument of any method, representing reference to the target.
+        static Symbol KwBase {"base"}; // cast of "this" to the base type of the current class.
+        static Symbol KwVirtual {"virtual"}; // alllows virtual methods.
+        static Symbol KwOverride {"override"}; // allows override of virtual methods.
 
         bool static isParsebleKeyword(Symbol const & s) {
-            return s == KwClass;
+            return s == KwClass || s == KwVirtual || s == KwOverride;
         }
     } // namespace symbols
 

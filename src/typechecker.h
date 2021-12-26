@@ -64,6 +64,39 @@ namespace tinycpp {
          */
         Type::Function const * asFunctionType(Type * t);
 
+    public: // parse error checks
+        void checkTypeCompletion(Type * type, AST * ast) const {
+            if (!type->isFullyDefined()) {
+                throw ParserError{
+                    STR("Type " << type->toString() << " is not fully defined"),
+                    ast->location()
+                };
+            }
+        }
+
+        template<typename T> // where T is type of AST
+        void checkTypeCompletion(Type * type, std::unique_ptr<T> const & ast) const {
+            checkTypeCompletion(type, ast.get());
+        }
+
+        void checkReturnType(Type::Function * function, Type * returnType, AST * functionAst) const {
+            if (returnType != function->returnType()) {
+                throw ParserError{
+                    STR("Invalid function return type: " << function->toString()),
+                    functionAst->location()
+                };
+            }
+        }
+
+        void addVariable(AST * ast, Symbol name, Type * type) {
+            if (!names_.addVariable(name, type)) {
+                throw ParserError{
+                    STR("Name " << name.name() << " already used"),
+                    ast->location()
+                };
+            }
+        }
+
     public: // visitor implementation
         void visit(AST * ast) override;
         void visit(ASTInteger * ast) override;
@@ -79,9 +112,10 @@ namespace tinycpp {
         void visit(ASTBlock * ast) override;
         void visit(ASTVarDecl * ast) override;
         void visit(ASTFunDecl * ast) override;
+        void visit(ASTFunPtrDecl * ast) override;
         void visit(ASTStructDecl * ast) override;
         void visit(ASTClassDecl * ast) override;
-        void visit(ASTFunPtrDecl * ast) override;
+        void visit(ASTMethodDecl * ast) override;
         void visit(ASTIf * ast) override;
         void visit(ASTSwitch * ast) override;
         void visit(ASTWhile * ast) override;

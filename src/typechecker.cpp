@@ -104,8 +104,7 @@ namespace tinycpp {
 
     void TypeChecker::visit(ASTVarDecl * ast) {
         auto * t = visitChild(ast->type);
-        if (!t->isFullyDefined())
-            throw ParserError(STR("Type " << t->toString() << " is not fully defined yet"), ast->location());
+        checkTypeCompletion(t, ast);
         if (ast->value != nullptr) {
             auto * valueType = visitChild(ast->value);
             if (valueType != t)
@@ -114,59 +113,77 @@ namespace tinycpp {
         if (auto context = pop<Context::Complex>(); context.has_value()) {
             context.value().complexType->registerMember(ast->name->name, t, ast);
         } else {
-            if (!names_.addVariable(ast->name->name, t)) {
-                throw ParserError{STR("Name " << ast->name->name.name() << " already used"), ast->location()};
-            }
+            addVariable(ast, ast->name->name, t);
         }
         return ast->setType(t);
     }
 
     void TypeChecker::visit(ASTFunDecl * ast) {
         // first get the function type
-        auto * classAst = ast->findParent<ASTClassDecl>();
         std::unique_ptr<Type::Function> ftype{
-            classAst == nullptr
-                ? new Type::Function{visitChild(ast->typeDecl)}
-                : new Type::Method{visitChild(ast->typeDecl), classAst->getType()}
+            new Type::Function{visitChild(ast->typeDecl)}
         };
-        if (!ftype->returnType()->isFullyDefined())
-            throw ParserError{STR("Return type " << ftype->returnType()->toString() << " is not fully defined"), ast->typeDecl->location()};
+        checkTypeCompletion(ftype->returnType(), ast->typeDecl);
 
         // typecheck all arguments, make sure the argument types are fully defined and add the arguments as local variables
-        if (classAst != nullptr) {
-            ftype->addArgument(types_.getOrCreatePointerType(classAst->getType()));
-        }
         for (auto & i : ast->args) {
             auto * argType = visitChild(i->type);
-            if (!argType->isFullyDefined())
-                throw ParserError(STR("Type " << argType->toString() << " is not fully defined"), i->type->location());
+            checkTypeCompletion(argType, i);
             ftype->addArgument(argType);
         }
 
         // creates function type
         auto * t = types_.getOrCreateFunctionType(std::move(ftype));
-        if (!classAst && !names_.addVariable(ast->name, t)) {
-            throw ParserError{STR("Name " << ast->name.name() << " already used"), ast->location()};
-        }
+        addVariable(ast, ast->name, t);
         ast->setType(t);
-        if (classAst) { // registering self as member of the class
-            auto * classType = dynamic_cast<Type::Class*>(classAst->getType());
-            classType->registerMember(ast->name.name(), t, ast);
-        }
-
         // enter the context and add all arguments as local variables
         names_.enterFunctionScope(t->returnType());
         {
-            if (classAst) {
-                names_.addVariable(symbols::KwThis, types_.getOrCreatePointerType(classAst->getType()));
-            }
             for (auto & i : ast->args) {
                 names_.addVariable(i->name->name, i->type->getType());
             }
             // typecheck the function body
             auto * actualReturn = visitChild(ast->body);
-            if (actualReturn != t->returnType())
-                throw ParserError{STR("Invalid function return type: " << actualReturn->toString()), ast->location()};
+            checkReturnType(t, actualReturn, ast);
+        }
+        // leave the function context
+        names_.leaveCurrentScope();
+    }
+
+
+    void TypeChecker::visit(ASTMethodDecl * ast) {
+        // first get the function type
+        auto * classAst = ast->findParent<ASTClassDecl>();
+        std::unique_ptr<Type::Function> ftype{
+            new Type::Method{visitChild(ast->typeDecl), classAst->getType()}
+        };
+        checkTypeCompletion(ftype->returnType(), ast->typeDecl);
+
+        // typecheck all arguments, make sure the argument types are fully defined and add the arguments as local variables
+        ftype->addArgument(types_.getOrCreatePointerType(classAst->getType()));
+        for (auto & i : ast->args) {
+            auto * argType = visitChild(i->type);
+            checkTypeCompletion(argType, i->type);
+            ftype->addArgument(argType);
+        }
+
+        // creates function type
+        auto * t = types_.getOrCreateFunctionType(std::move(ftype));
+        ast->setType(t);
+        // registering self as member of the class
+        auto * classType = classAst->getType()->getCore<Type::Complex>();
+        classType->registerMember(ast->name.name(), t, ast);
+
+        // enter the context and add all arguments as local variables
+        names_.enterFunctionScope(t->returnType());
+        {
+            names_.addVariable(symbols::KwThis, types_.getOrCreatePointerType(classAst->getType()));
+            for (auto & i : ast->args) {
+                names_.addVariable(i->name->name, i->type->getType());
+            }
+            // typecheck the function body
+            auto * actualReturn = visitChild(ast->body);
+            checkReturnType(t, actualReturn, ast);
         }
         // leave the function context
         names_.leaveCurrentScope();

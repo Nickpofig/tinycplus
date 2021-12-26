@@ -27,8 +27,11 @@ namespace tinycpp {
             return false;
         }
 
+        template<typename T>
+        T * as() { return dynamic_cast<T*>(this); }
+
     // [*] Hierarchy information
-    public: // data
+    public:
         AST * parentAST = nullptr;
         template<typename T>
         T * findParent(std::optional<int> depth = std::nullopt) {
@@ -367,13 +370,13 @@ namespace tinycpp {
         Symbol name;
         std::vector<std::unique_ptr<ASTVarDecl>> args;
         std::unique_ptr<AST> body;
-
+    public:
         ASTFunDecl(Token const & t, std::unique_ptr<ASTType> type):
             AST{t},
             typeDecl{std::move(type)},
             name{t.valueSymbol()} {
         }
-
+    public:
         void print(ASTPrettyPrinter & p) const override {
             p << (*typeDecl) << " " << p.identifier << name.name() << p.symbol << "(";
             auto arg = args.begin();
@@ -394,17 +397,15 @@ namespace tinycpp {
     public:
         Symbol name;
         std::vector<std::unique_ptr<ASTVarDecl>> fields;
-
         /** If true the struct has also field definitions. Extra flag is necessary because empty fields can also mean an empty struct.
          */
         bool isDefinition = false;
-
+    public:
         ASTStructDecl(Token const & t, Symbol name):
             AST{t},
             name{name} {
         }
-
-
+    public:
         void print(ASTPrettyPrinter & p) const override {
             p << p.keyword << "struct " << p.identifier << name.name();
             if (isDefinition) {
@@ -419,10 +420,51 @@ namespace tinycpp {
                 p << p.symbol << "}";
             }
         }
-
     protected:
         void accept(ASTVisitor * v) override;
+    };
 
+
+    class ASTMethodDecl : public ASTFunDecl {
+    public:
+        enum class Virtuality {
+            None,
+            Base,
+            Override
+        };
+        Virtuality virtuality;
+    public:
+        ASTMethodDecl(Token const & t, std::unique_ptr<ASTType> type)
+            :ASTFunDecl{t, std::move(type)}
+            ,virtuality{Virtuality::None}
+        { }
+    public:
+        bool isVirtualBase() const { return virtuality == Virtuality::Base; }
+        bool isOverride() const { return virtuality == Virtuality::Override; }
+        bool isVirtual() const { return isVirtualBase() || isOverride(); }
+
+        void print(ASTPrettyPrinter & p) const override {
+            p << (*typeDecl) << " " << p.identifier << name.name() << p.symbol << "(";
+            auto arg = args.begin();
+            if (arg != args.end()) {
+                p << *arg[0];
+                while (++arg != args.end()) {
+                    p << p.symbol << ", " << *arg[0];
+                }
+            }
+            p << p.symbol << ")";
+            switch (virtuality) {
+            case Virtuality::Base:
+                p << p.keyword << " " << symbols::KwVirtual.name() << " ";
+                break;
+            case Virtuality::Override:
+                p << p.keyword << " " << symbols::KwOverride.name() << " ";
+                break;
+            }
+            p << (*body);
+        }
+    protected:
+        void accept(ASTVisitor * v) override;
     };
 
 
@@ -431,7 +473,7 @@ namespace tinycpp {
         Symbol name;
         std::unique_ptr<ASTType> baseClass;
         std::vector<std::unique_ptr<ASTVarDecl>> fields;
-        std::vector<std::unique_ptr<ASTFunDecl>> methods;
+        std::vector<std::unique_ptr<ASTMethodDecl>> methods;
 
         /** If true the struct has also field definitions. Extra flag is necessary because empty fields can also mean an empty struct.
          */
@@ -952,9 +994,10 @@ namespace tinycpp {
         virtual void visit(ASTBlock * ast) = 0;
         virtual void visit(ASTVarDecl * ast) = 0;
         virtual void visit(ASTFunDecl * ast) = 0;
+        virtual void visit(ASTFunPtrDecl * ast) = 0;
         virtual void visit(ASTStructDecl * ast) = 0;
         virtual void visit(ASTClassDecl * ast) = 0;
-        virtual void visit(ASTFunPtrDecl * ast) = 0;
+        virtual void visit(ASTMethodDecl * ast) = 0;
         virtual void visit(ASTIf * ast) = 0;
         virtual void visit(ASTSwitch * ast) = 0;
         virtual void visit(ASTWhile * ast) = 0;
@@ -996,9 +1039,10 @@ namespace tinycpp {
     inline void ASTBlock::accept(ASTVisitor * v) { v->visit(this); }
     inline void ASTVarDecl::accept(ASTVisitor * v) { v->visit(this); }
     inline void ASTFunDecl::accept(ASTVisitor * v) { v->visit(this); }
-    inline void ASTClassDecl::accept(ASTVisitor * v) { v->visit(this); }
-    inline void ASTStructDecl::accept(ASTVisitor * v) { v->visit(this); }
     inline void ASTFunPtrDecl::accept(ASTVisitor * v) { v->visit(this); }
+    inline void ASTStructDecl::accept(ASTVisitor * v) { v->visit(this); }
+    inline void ASTClassDecl::accept(ASTVisitor * v) { v->visit(this); }
+    inline void ASTMethodDecl::accept(ASTVisitor * v) { v->visit(this); }
     inline void ASTIf::accept(ASTVisitor * v) { v->visit(this); }
     inline void ASTSwitch::accept(ASTVisitor * v) { v->visit(this); }
     inline void ASTWhile::accept(ASTVisitor * v) { v->visit(this); }

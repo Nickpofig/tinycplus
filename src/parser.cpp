@@ -8,17 +8,20 @@ namespace tinycpp {
         return false;
     }
 
-    std::unique_ptr<AST> Parser::FUN_OR_VAR_DECL() {
-        // it can be either function or variable declaration now, we just do the dirty trick by first parsing the type and identifier to determine whether we re dealing with a function or variable declaration, then revert the parser and parser the proper nonterminal this time
+    std::unique_ptr<AST> Parser::FUN_OR_VAR_DECL(bool isForClass) {
+        // it can be either function or variable declaration now,
+        // we just do the dirty trick by first parsing the type and identifier
+        // to determine whether we are dealing with a function or variable declaration,
+        // then revert the parser and parse the proper nonterminal this time
         Position x = position();
         TYPE(true);
         IDENT();
         if (top() == Symbol::ParOpen) {
             revertTo(x);
-            return FUN_DECL();
+            return FUN_DECL(isForClass);
         } else {
             revertTo(x);
-            auto varDecl = VAR_DECLS();
+            auto varDecl = isForClass ? VAR_DECL() : VAR_DECLS();
             pop(Symbol::Semicolon);
             return varDecl;
         }
@@ -37,7 +40,7 @@ namespace tinycpp {
             } else if (top() == Symbol::KwTypedef) {
                 result->body.push_back(FUNPTR_DECL());
             } else {
-                result->body.push_back(FUN_OR_VAR_DECL());
+                result->body.push_back(FUN_OR_VAR_DECL(false));
             }
         }
         return result;
@@ -60,11 +63,15 @@ namespace tinycpp {
     /* FUN_DECL := TYPE_FUN_RET identifier '(' [ FUN_ARG { ',' FUN_ARG } ] ')' [ BLOCK_STMT ]
         FUN_ARG := TYPE identifier
         */
-    std::unique_ptr<AST> Parser::FUN_DECL() {
+    std::unique_ptr<AST> Parser::FUN_DECL(bool isMethod) {
         std::unique_ptr<ASTType> type{TYPE_FUN_RET()};
         if (!isIdentifier(top()))
             throw ParserError(STR("Expected identifier, but " << top() << " found"), top().location(), eof());
-        std::unique_ptr<ASTFunDecl> result{new ASTFunDecl{pop(), std::move(type)}};
+        auto name = pop();
+        auto * method = isMethod ? new ASTMethodDecl{name, std::move(type)} : nullptr;
+        std::unique_ptr<ASTFunDecl> result{
+            isMethod ? method : new ASTFunDecl{name, std::move(type)}
+        };
         pop(Symbol::ParOpen);
         if (top() != Symbol::ParClose) {
             do {
@@ -80,6 +87,14 @@ namespace tinycpp {
             } while (condPop(Symbol::Comma));
         }
         pop(Symbol::ParClose);
+        // define method virtuality
+        if (isMethod) {
+            if (condPop(symbols::KwVirtual)) {
+                method->virtuality = ASTMethodDecl::Virtuality::Base;
+            } else if (condPop(symbols::KwOverride)) {
+                method->virtuality = ASTMethodDecl::Virtuality::Override;
+            }
+        }
         // if there is body, parse it, otherwise leave empty as it is just a declaration
         if (top() == Symbol::CurlyOpen)
             result->body = BLOCK_STMT();
@@ -341,20 +356,17 @@ namespace tinycpp {
         }
         // Parses body
         if (condPop(Symbol::CurlyOpen)) {
+            classDecl->isDefinition = true;
             while (! condPop(Symbol::CurlyClose)) {
                 // parsing field and method
-                auto member = FUN_OR_VAR_DECL();
-                if (auto * fields = dynamic_cast<ASTSequence*>(member.get())) { // saving as sequence of fields
-                    for (auto & i : fields->body) {
-                        auto * field = dynamic_cast<ASTVarDecl*>(i.release());
-                        classDecl->fields.push_back(std::unique_ptr<ASTVarDecl>(field));
-                    }
-                } else if (auto function = dynamic_cast<ASTFunDecl*>(member.get())) { // saving as method
-                    classDecl->methods.push_back(std::unique_ptr<ASTFunDecl>(function));
+                auto member = FUN_OR_VAR_DECL(true);
+                if (auto * field = member->as<ASTVarDecl>()) {
+                    classDecl->fields.push_back(std::unique_ptr<ASTVarDecl>(field));
+                } else if (auto * method = member->as<ASTMethodDecl>()) { // saving as method
+                    classDecl->methods.push_back(std::unique_ptr<ASTMethodDecl>(method));
                 }
                 member.release();
             }
-            classDecl->isDefinition = true;
         }
         pop(Symbol::Semicolon);
         return classDecl;

@@ -53,6 +53,13 @@ namespace tinycpp {
                 traverse(ast, it.get());
             }
         }
+        void visit(ASTFunPtrDecl * ast) override {
+            traverse(ast, ast->returnType.get());
+            traverse(ast, ast->name.get());
+            for (auto & it : ast->args) {
+                traverse(ast, it.get());
+            }
+        }
         void visit(ASTStructDecl * ast) override {
             for (auto & it : ast->fields) {
                 traverse(ast, it.get());
@@ -66,9 +73,9 @@ namespace tinycpp {
                 traverse(ast, it.get());
             }
         }
-        void visit(ASTFunPtrDecl * ast) override {
-            traverse(ast, ast->returnType.get());
-            traverse(ast, ast->name.get());
+        void visit(ASTMethodDecl * ast) override {
+            traverse(ast, ast->typeDecl.get());
+            traverse(ast, ast->body.get());
             for (auto & it : ast->args) {
                 traverse(ast, it.get());
             }

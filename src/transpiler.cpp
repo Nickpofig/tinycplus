@@ -74,7 +74,7 @@ namespace tinycpp {
         for (auto & i : ast->body) {
             printer_.newline();
             visitChild(i.get());
-            if (ast->parentAST != nullptr && !dynamic_cast<ASTFunDecl *>(i.get())) {
+            if (ast->parentAST != nullptr && !i->as<ASTFunDecl>()) {
                 printSymbol(Symbol::Semicolon);
             }
         }
@@ -87,7 +87,7 @@ namespace tinycpp {
     }
 
     void Transpiler::visit(ASTVarDecl * ast) {
-        if (auto arrayType = dynamic_cast<ASTArrayType*>(ast->type.get())) {
+        if (auto arrayType = ast->type->as<ASTArrayType>()) {
             // base type part
             visitChild(arrayType->base.get());
             printSpace();
@@ -114,27 +114,13 @@ namespace tinycpp {
     }
 
     void Transpiler::visit(ASTFunDecl * ast) {
-        auto * classParent = ast->findParent<ASTClassDecl>();
         // * method return type
         visitChild(ast->typeDecl.get());
         printSpace();
         // * method name
-        if (classParent) { // ..inserts class name at the beginning
-            printClassPrefix(classParent->getType());
-        }
         printIdentifier(ast->name.name());
         // * method arguments
         printSymbol(Symbol::ParOpen);
-        if (classParent) { // ..inserts pointer to the owner class as the first argument
-            printType(classParent->name.name());
-            printSymbol(Symbol::Mul);
-            printSpace();
-            printIdentifier(symbols::KwThis);
-            if (ast->args.size() > 0) {
-                printSymbol(Symbol::Comma);
-                printSpace();
-            }
-        }
         auto arg = ast->args.begin();
         if (arg != ast->args.end()) {
             visitChild(arg[0].get());
@@ -204,6 +190,41 @@ namespace tinycpp {
                 }
             }
         }
+    }
+
+
+    void Transpiler::visit(ASTMethodDecl * ast) {
+        auto * classParent = ast->findParent<ASTClassDecl>();
+        assert(classParent && "must have an ast class decl as parent ast");
+        // * method return type
+        visitChild(ast->typeDecl.get());
+        printSpace();
+        // * method name
+        printClassPrefix(classParent->getType());
+        printIdentifier(ast->name.name());
+        // * method arguments
+        printSymbol(Symbol::ParOpen);
+        // inserts pointer to the owner class as the first argument
+        printType(classParent->name.name());
+        printSymbol(Symbol::Mul);
+        printSpace();
+        printIdentifier(symbols::KwThis);
+        if (ast->args.size() > 0) {
+            printSymbol(Symbol::Comma);
+            printSpace();
+        }
+        auto arg = ast->args.begin();
+        if (arg != ast->args.end()) {
+            visitChild(arg[0].get());
+            while (++arg != ast->args.end()) {
+                printSymbol(Symbol::Comma);
+                printSpace();
+                visitChild(arg[0].get());
+            }
+        }
+        printSymbol(Symbol::ParClose);
+        // * method body
+        visitChild(ast->body.get());
     }
 
     void Transpiler::visit(ASTFunPtrDecl * ast) {
@@ -371,7 +392,7 @@ namespace tinycpp {
     }
 
     void Transpiler::visit(ASTMember * ast) {
-        if (dynamic_cast<ASTCall*>(ast->member.get())) { // method call
+        if (ast->member->as<ASTCall>()) { // method call
             /// WARNING: function pointer is allowed only in root context,
             ///       however if it will change and data structures become allowed to use them
             ///       then a redesign must take place.
