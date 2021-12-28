@@ -119,24 +119,20 @@ namespace tinycpp {
     }
 
     void TypeChecker::visit(ASTFunDecl * ast) {
-        // first get the function type
-        std::unique_ptr<Type::Function> ftype{
-            new Type::Function{visitChild(ast->typeDecl)}
-        };
+        // creates function type from ast
+        std::unique_ptr<Type::Function> ftype{new Type::Function{visitChild(ast->typeDecl)}};
         checkTypeCompletion(ftype->returnType(), ast->typeDecl);
-
-        // typecheck all arguments, make sure the argument types are fully defined and add the arguments as local variables
+        // adds argument types
         for (auto & i : ast->args) {
             auto * argType = visitChild(i->type);
             checkTypeCompletion(argType, i);
             ftype->addArgument(argType);
         }
-
-        // creates function type
+        // registers function type
         auto * t = types_.getOrCreateFunctionType(std::move(ftype));
         addVariable(ast, ast->name, t);
         ast->setType(t);
-        // enter the context and add all arguments as local variables
+        // enters the context and add all arguments as local variables
         names_.enterFunctionScope(t->returnType());
         {
             for (auto & i : ast->args) {
@@ -146,38 +142,51 @@ namespace tinycpp {
             auto * actualReturn = visitChild(ast->body);
             checkReturnType(t, actualReturn, ast);
         }
-        // leave the function context
+        // leaves the function context
         names_.leaveCurrentScope();
     }
 
 
     void TypeChecker::visit(ASTMethodDecl * ast) {
-        // first get the function type
-        auto * classAst = ast->findParent<ASTClassDecl>();
-        std::unique_ptr<Type::Function> ftype{
-            new Type::Method{visitChild(ast->typeDecl), classAst->getType()}
-        };
+        // creates function type
+        auto context = pop<Context::Complex>();
+        auto * classType = context->complexType->as<Type::Class>();
+        std::unique_ptr<Type::Function> ftype{new Type::Function{visitChild(ast->typeDecl)}};
         checkTypeCompletion(ftype->returnType(), ast->typeDecl);
-
-        // typecheck all arguments, make sure the argument types are fully defined and add the arguments as local variables
-        ftype->addArgument(types_.getOrCreatePointerType(classAst->getType()));
+        // adds argument types
+        ftype->addArgument(types_.getOrCreatePointerType(classType));
         for (auto & i : ast->args) {
             auto * argType = visitChild(i->type);
             checkTypeCompletion(argType, i->type);
             ftype->addArgument(argType);
         }
-
-        // creates function type
+        // registers function type
         auto * t = types_.getOrCreateFunctionType(std::move(ftype));
         ast->setType(t);
-        // registering self as member of the class
-        auto * classType = classAst->getType()->getCore<Type::Complex>();
-        classType->registerMember(ast->name.name(), t, ast);
-
-        // enter the context and add all arguments as local variables
+        auto methodName = ast->name.name();
+        // registers self as member of the class
+        if (ast->isVirtual()) {
+            if (!classType->hasOwnVirtualTable()) {
+                auto vtableName = Symbol{STR("__tinycpp__" << classType->toString() << "__vtable__")};
+                classType->setVirtualTable(types_.getOrCreateVTable(vtableName));
+            }
+            auto * vtable = classType->getVirtualTable();
+            auto vtableMemberName = Symbol{STR("__tinycpp__" << classType->toString() << "__vtable__" << methodName)};
+            auto * vtableMemberType = types_.createTypeAlias(vtableMemberName, types_.getOrCreatePointerType(t));
+            if (ast->isOverride()) {
+                vtable->overrideMember(methodName, vtableMemberType, ast);
+            } else {
+                vtable->registerMember(methodName, vtableMemberType, ast);
+            }
+        }
+        classType->registerMember(methodName, t, ast);
+        // enters the context and add all arguments as local variables
         names_.enterFunctionScope(t->returnType());
         {
-            names_.addVariable(symbols::KwThis, types_.getOrCreatePointerType(classAst->getType()));
+            names_.addVariable(symbols::KwThis, types_.getOrCreatePointerType(classType));
+            if (auto * base = classType->getBase()) {
+                names_.addVariable(symbols::KwBase, types_.getOrCreatePointerType(classType->getBase()));
+            }
             for (auto & i : ast->args) {
                 names_.addVariable(i->name->name, i->type->getType());
             }
@@ -185,7 +194,7 @@ namespace tinycpp {
             auto * actualReturn = visitChild(ast->body);
             checkReturnType(t, actualReturn, ast);
         }
-        // leave the function context
+        // leaves the function context
         names_.leaveCurrentScope();
     }
 
@@ -222,7 +231,8 @@ namespace tinycpp {
         }
         ast->setType(type);
         if (ast->baseClass) {
-            auto * baseType = visitChild(ast->baseClass);
+            auto * baseType = visitChild(ast->baseClass)->as<Type::Class>();
+            assert(baseType != nullptr);
             type->setBase(baseType);
         }
         type->updateDefinition(ast);
@@ -282,7 +292,7 @@ namespace tinycpp {
         return ast->setType(types_.getTypeVoid());
     }
 
-    void TypeChecker::visit(ASTWhile * ast) { 
+    void TypeChecker::visit(ASTWhile * ast) {
         if (! types_.convertsToBool(visitChild(ast->cond)))
             throw ParserError{STR("Condition must convert to bool, but " << ast->cond->getType()->toString() << " found"), ast->cond->location()};
         visitChild(ast->body);

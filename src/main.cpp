@@ -31,7 +31,7 @@ int main(int argc, char ** argv) {
         tinycpp::NamesContext namesContext{typesContext.getTypeVoid()};
         tinycpp::TypeChecker typechecker{typesContext, namesContext};
         tinycpp::ASTParenter astparenter{};
-        tinycpp::Transpiler transpiler{namesContext, std::cout, isPrintColorful};
+        tinycpp::Transpiler transpiler{namesContext, typesContext, std::cout, isPrintColorful};
         auto program = tinycpp::Parser::ParseFile(inputFilepath);
         astparenter.visit(program.get());
         typechecker.visit(program.get());

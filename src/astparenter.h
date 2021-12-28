@@ -9,7 +9,7 @@ namespace tinycpp {
     private:
         void traverse(AST * parent, AST * child) {
             if (child == nullptr) return;
-            child->parentAST = parent;
+            child->parent = parent;
             visitChild(child);
         }
 
@@ -48,17 +48,17 @@ namespace tinycpp {
         }
         void visit(ASTFunDecl * ast) override {
             traverse(ast, ast->typeDecl.get());
-            traverse(ast, ast->body.get());
             for (auto & it : ast->args) {
                 traverse(ast, it.get());
             }
+            traverse(ast, ast->body.get());
         }
         void visit(ASTFunPtrDecl * ast) override {
             traverse(ast, ast->returnType.get());
-            traverse(ast, ast->name.get());
             for (auto & it : ast->args) {
                 traverse(ast, it.get());
             }
+            traverse(ast, ast->name.get());
         }
         void visit(ASTStructDecl * ast) override {
             for (auto & it : ast->fields) {
@@ -75,10 +75,10 @@ namespace tinycpp {
         }
         void visit(ASTMethodDecl * ast) override {
             traverse(ast, ast->typeDecl.get());
-            traverse(ast, ast->body.get());
             for (auto & it : ast->args) {
                 traverse(ast, it.get());
             }
+            traverse(ast, ast->body.get());
         }
         void visit(ASTIf * ast) override {
             traverse(ast, ast->cond.get());
@@ -107,7 +107,9 @@ namespace tinycpp {
         }
         void visit(ASTBreak * ast) override { }
         void visit(ASTContinue * ast) override { }
-        void visit(ASTReturn * ast) override { }
+        void visit(ASTReturn * ast) override {
+            traverse(ast, ast->value.get());
+        }
         void visit(ASTBinaryOp * ast) override {
             traverse(ast, ast->left.get());
             traverse(ast, ast->right.get());

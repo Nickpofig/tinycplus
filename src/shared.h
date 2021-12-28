@@ -20,10 +20,11 @@ namespace tinycpp {
 
     namespace symbols {
         static Symbol KwClass {"class"}; // special data model representing an object.
-        static Symbol KwThis {"this"}; // compulsory first argument of any method, representing reference to the target.
-        static Symbol KwBase {"base"}; // cast of "this" to the base type of the current class.
         static Symbol KwVirtual {"virtual"}; // alllows virtual methods.
         static Symbol KwOverride {"override"}; // allows override of virtual methods.
+        static Symbol KwThis {"this"}; // compulsory first argument of any method, representing reference to the target.
+        static Symbol KwBase {"base"}; // cast of "this" to the base type of the current class.
+        static Symbol VTable {"__tinycpp__vtable"}; // name for class field with vtable pointer type.
 
         bool static isParsebleKeyword(Symbol const & s) {
             return s == KwClass || s == KwVirtual || s == KwOverride;

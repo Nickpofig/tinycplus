@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <unordered_map>
+#include <functional>
 
 // internal
 #include "shared.h"
@@ -79,31 +80,34 @@ namespace tinycpp {
             return isPointer(t) || isPOD(t);
         }
 
-    public: // mutators
-        Type::Struct * getOrCreateStructType(Symbol name) {
+    private: // getters
+        template<typename T>
+        T * getOrCreateNonAliasType(Symbol name, std::function<T*()> maker) {
             // struct types can't have aliases
             auto i = types_.find(name.name());
             if (i == types_.end()) {
-                Type::Struct * result = new Type::Struct{nullptr};
+                T * result = maker();
                 types_.insert(std::make_pair(name.name(), std::unique_ptr<Type>{result}));
                 return result;
             } else {
-                Type::Struct * result = dynamic_cast<Type::Struct*>(i->second.get());
+                T * result = dynamic_cast<T*>(i->second.get());
                 return result;
             }
         }
+    public: // mutators
+        Type::Struct * getOrCreateStructType(Symbol name) {
+            auto maker = [] () { return new Type::Struct{nullptr}; };
+            return getOrCreateNonAliasType<Type::Struct>(name, maker);
+        }
 
         Type::Class * getOrCreateClassType(Symbol name) {
-            // class types can't have aliases
-            auto i = types_.find(name.name());
-            if (i == types_.end()) {
-                auto * result = new Type::Class{nullptr};
-                types_.insert(std::make_pair(name.name(), std::unique_ptr<Type>{result}));
-                return result;
-            } else {
-                auto * result = dynamic_cast<Type::Class *>(i->second.get());
-                return result;
-            }
+            auto maker = [] () { return new Type::Class{nullptr}; };
+            return getOrCreateNonAliasType<Type::Class>(name, maker);
+        }
+
+        Type::VTable * getOrCreateVTable(Symbol name) {
+            auto maker = [name] () { return new Type::VTable{name}; };
+            return getOrCreateNonAliasType<Type::VTable>(name, maker);
         }
 
         Type::Function * getOrCreateFunctionType(std::unique_ptr<Type::Function> type) {
@@ -207,6 +211,14 @@ namespace tinycpp {
             if (current_->entities.find(name) != current_->entities.end())
                 return false;
             current_->entities.insert(std::make_pair(name, type));
+            return true;
+        }
+
+        bool addGlobalVariable(Symbol name, Type * type) {
+            // check if the name already exists
+            if (global_.entities.find(name) != global_.entities.end())
+                return false;
+            global_.entities.insert(std::make_pair(name, type));
             return true;
         }
 

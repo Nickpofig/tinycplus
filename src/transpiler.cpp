@@ -1,4 +1,6 @@
 #include <typeinfo>
+#include <vector>
+#include <unordered_set>
 
 // internal
 #include "transpiler.h"
@@ -31,7 +33,19 @@ namespace tinycpp {
     }
 
     void Transpiler::visit(ASTIdentifier * ast) {
-        printIdentifier(ast->name);
+        if (ast->name == symbols::KwBase) {
+            // downcasts because method belonfs to base class
+            printKeyword(Symbol::KwCast);
+            printSymbol(Symbol::Lt);
+            printType(ast->getType()->getCore<Type::Class>()->toString());
+            printType(Symbol::Mul);
+            printSymbol(Symbol::Gt);
+            printSymbol(Symbol::ParOpen);
+            printIdentifier(symbols::KwThis);
+            printSymbol(Symbol::ParClose);
+        } else {
+            printIdentifier(ast->name);
+        }
     }
 
     void Transpiler::visit(ASTType * ast) {
@@ -67,18 +81,18 @@ namespace tinycpp {
     }
 
     void Transpiler::visit(ASTBlock * ast) {
-        if (ast->parentAST) { // ..when not the root context
+        if (ast->parent) { // ..when not the root context
             printSymbol(Symbol::CurlyOpen);
             printer_.indent();
         }
         for (auto & i : ast->body) {
             printer_.newline();
             visitChild(i.get());
-            if (ast->parentAST != nullptr && !i->as<ASTFunDecl>()) {
+            if (ast->parent != nullptr && !i->as<ASTFunDecl>()) {
                 printSymbol(Symbol::Semicolon);
             }
         }
-        if (ast->parentAST) { // ..when not the root context
+        if (ast->parent) { // ..when not the root context
             printer_.dedent();
             printer_.newline();
             printSymbol(Symbol::CurlyClose);
@@ -110,6 +124,15 @@ namespace tinycpp {
             printSymbol(Symbol::Assign);
             printSpace();
             visitChild(ast->value.get());
+        } else if (auto * complexType = ast->getType()->as<Type::Complex>();
+            complexType != nullptr && ast->parent->as<ASTSequence>()
+        ) {
+            printSpace();
+            printSymbol(Symbol::Assign);
+            printSpace();
+            printIdentifier(complexType->getConstructorName());
+            printSymbol(Symbol::ParOpen);
+            printSymbol(Symbol::ParClose);
         }
     }
 
@@ -131,6 +154,7 @@ namespace tinycpp {
             }
         }
         printSymbol(Symbol::ParClose);
+        printSpace();
         // * method body
         visitChild(ast->body.get());
     }
@@ -152,11 +176,83 @@ namespace tinycpp {
             printSymbol(Symbol::CurlyClose);
             printSymbol(Symbol::Semicolon);
         }
+        printComplexTypeConstructorDeclaration(ast->getType()->as<Type::Complex>());
     }
 
     void Transpiler::visit(ASTClassDecl * ast) {
         bool isProcessingSelf = inheritanceDepth == 0;
+        auto * classType = dynamic_cast<Type::Class*>(ast->getType());
+        auto * vtableType = classType->getVirtualTable();
+        std::vector<std::pair<Symbol, Type::Complex::Member>> vtableMembers;
         if (isProcessingSelf) {
+            printer_.newline();
+            printComment(STR(" === class " << ast->name.name() << " ==="));
+            printer_.newline();
+            // * virtual table declaration and definition
+            if (vtableType != nullptr && classType->hasOwnVirtualTable() && classType->isFullyDefined()) {
+                vtableType->collectMembersOrdered(vtableMembers);
+                // ** function pointer types
+                for (auto & it : vtableMembers) {
+                    auto * funPtrType = it.second.type->as<Type::Alias>();
+                    auto * functionType = funPtrType->base()->getCore<Type::Function>();
+                    printKeyword(Symbol::KwTypedef);
+                    // *** return type declaration
+                    printSpace();
+                    printType(functionType->returnType());
+                    // *** name as pointer
+                    printSpace();
+                    printSymbol(Symbol::ParOpen);
+                    printSymbol(Symbol::Mul);
+                    printType(funPtrType);
+                    printSymbol(Symbol::ParClose);
+                    // *** arguments
+                    printSymbol(Symbol::ParOpen);
+                    for (auto i = 0; i < functionType->numArgs(); i++) {
+                        if (i > 0) {
+                            printSymbol(Symbol::Comma);
+                            printSpace();
+                        }
+                        printType(functionType->argType(i));
+                    }
+                    printSymbol(Symbol::ParClose);
+                    printSymbol(Symbol::Semicolon);
+                    printer_.newline();
+                }
+                printer_.newline();
+                // ** vtable struct
+                printKeyword(Symbol::KwStruct);
+                printSpace();
+                // *** struct name
+                printIdentifier(vtableType->toString());
+                printSpace();
+                // *** function pointers
+                printSymbol(Symbol::CurlyOpen);
+                printer_.indent();
+                printer_.newline();
+                auto remained = vtableMembers.size();
+                for (auto & member : vtableMembers) {
+                    printType(member.second.type);
+                    printSpace();
+                    printIdentifier(member.first);
+                    printSymbol(Symbol::Semicolon);
+                    if (--remained > 0) {
+                        printer_.newline();
+                    }
+                }
+                printer_.dedent();
+                printer_.newline();
+                printSymbol(Symbol::CurlyClose);
+                printSymbol(Symbol::Semicolon);
+                printer_.newline();
+                printer_.newline();
+                printType(vtableType);
+                printSpace();
+                printIdentifier(vtableType->getGlobalInstanceName());
+                printSymbol(Symbol::Semicolon);
+                printer_.newline();
+                printer_.newline();
+            }
+            // * class declarartion
             printKeyword(Symbol::KwStruct);
             printSpace();
             printIdentifier(ast->name.name());
@@ -166,28 +262,42 @@ namespace tinycpp {
             if (isProcessingSelf) {
                 printSymbol(Symbol::CurlyOpen);
                 printer_.indent();
+                // ** pointer to vtable
+                printer_.newline();
+                printType(vtableType != nullptr ? vtableType : types_.getTypeVoid());
+                printSymbol(Symbol::Mul);
+                printSpace();
+                printIdentifier(symbols::VTable);
+                printSymbol(Symbol::Semicolon);
             }
+            // ** base class fields
             if (ast->baseClass) {
                 inheritanceDepth++; 
                 auto * baseClassType = dynamic_cast<Type::Class *>(ast->baseClass->getType());
                 visit(baseClassType->ast());
                 inheritanceDepth--;
             }
+            // ** this class fields
             for (auto & i : ast->fields) {
                 printer_.newline();
                 visitChild(i.get());
                 printSymbol(Symbol::Semicolon);
             }
+            // ** this class methods
             if (isProcessingSelf) {
                 printer_.dedent();
                 printer_.newline();
                 printSymbol(Symbol::CurlyClose);
                 printSymbol(Symbol::Semicolon);
-                // * class methods
+                printer_.newline();
+                // *** function declaration
                 for (auto & i : ast->methods) {
                     printer_.newline();
                     visitChild(i.get());
                 }
+                printer_.newline();
+                printVTableInitFunctionDeclaration(classType);
+                printComplexTypeConstructorDeclaration(classType);
             }
         }
     }
@@ -200,8 +310,9 @@ namespace tinycpp {
         visitChild(ast->typeDecl.get());
         printSpace();
         // * method name
-        printClassPrefix(classParent->getType());
-        printIdentifier(ast->name.name());
+        auto classType = classParent->getType()->as<Type::Class>();
+        auto info = classType->getMethodInfo(ast->name);
+        printIdentifier(info.fullName);
         // * method arguments
         printSymbol(Symbol::ParOpen);
         // inserts pointer to the owner class as the first argument
@@ -223,6 +334,7 @@ namespace tinycpp {
             }
         }
         printSymbol(Symbol::ParClose);
+        printSpace();
         // * method body
         visitChild(ast->body.get());
     }
@@ -243,10 +355,11 @@ namespace tinycpp {
         auto i = ast->args.begin();
         if (i != ast->args.end()) {
             visitChild(i[0].get());
-            while (++i != ast->args.end())
+            while (++i != ast->args.end()) {
                 printSymbol(Symbol::Comma);
                 printSpace();
                 visitChild(i[0].get());
+            }
         }
         printSymbol(Symbol::ParClose);
     }
@@ -405,46 +518,74 @@ namespace tinycpp {
     }
 
     void Transpiler::visit(ASTCall * ast) {
-        auto * methodType = dynamic_cast<Type::Method*>(ast->function->getType());
-        if (methodType) {
-            printClassPrefix(methodType->classType);
-        }
-        visitChild(ast->function.get());
-        printSymbol(Symbol::ParOpen);
-        if (methodType) { // ..moves method call target to a position of functions's first argument
-            auto * member = ast->findParent<ASTMember>();
-            if (member->op == Symbol::Dot) {
-                printSymbol(Symbol::BitAnd);
+        auto * ident = ast->function->as<ASTIdentifier>();
+        auto * member = ast->parent->as<ASTMember>();
+        if (member != nullptr && !ident->getType()->isPointer()) { // method call
+            /// TODO: handle the case where target is struct type and member to call is function pointer
+            auto targetType = member->base->getType();
+            auto * classType = targetType->getCore<Type::Class>();
+            auto methodInfo = classType->getMethodInfo(ident->name);
+            auto * targetClassType = methodInfo.targetClassType;
+            auto baseAsIdent = member->base->as<ASTIdentifier>();
+            if (methodInfo.ast->isVirtual() && (baseAsIdent == nullptr || baseAsIdent->name != symbols::KwBase)) {
+                visitChild(member->base.get());
+                printSymbol(targetType->isPointer() ? Symbol::ArrowR : Symbol::Dot);
+                printIdentifier(symbols::VTable);
+                printSymbol(Symbol::ArrowR);
+                printIdentifier(ident->name);
+            } else {
+                // direct call
+                printIdentifier(methodInfo.fullName);
             }
-            auto * baseType = member->base->getType();
-            bool castIsRequired = baseType->getCore<Type::Complex>() != methodType->classType;
-            if (castIsRequired) {
-                printKeyword(Symbol::KwCast);
-                printSymbol(Symbol::Lt);
-                printType(methodType->classType->toString());
-                printType(Symbol::Mul);
-                printSymbol(Symbol::Gt);
-                printSymbol(Symbol::ParOpen);
+            // * arguments
+            printSymbol(Symbol::ParOpen);
+            {
+                // * target as the first argument
+                if (member->op == Symbol::Dot) {
+                    printSymbol(Symbol::BitAnd);
+                }
+                if (classType != targetClassType) {
+                    // downcasts because method belonfs to base class
+                    printKeyword(Symbol::KwCast);
+                    printSymbol(Symbol::Lt);
+                    printType(targetClassType->toString());
+                    printType(Symbol::Mul);
+                    printSymbol(Symbol::Gt);
+                    printSymbol(Symbol::ParOpen);
+                    if (!targetType->isPointer()) {
+                        printSymbol(Symbol::BitAnd);
+                    }
+                    visitChild(member->base.get());
+                    printSymbol(Symbol::ParClose);
+                } else {
+                    // no cast
+                    if (!targetType->isPointer()) {
+                        printSymbol(Symbol::BitAnd);
+                    }
+                    visitChild(member->base.get());
+                }
+                // * the rest of arguments
+                for(auto & arg : ast->args) {
+                    printSymbol(Symbol::Comma);
+                    printSpace();
+                    visitChild(arg.get());
+                }
             }
-            visitChild(member->base.get());
-            if (castIsRequired) {
-                printSymbol(Symbol::ParClose);
-            }
-            if (ast->args.size() > 0) { 
-                printSymbol(Symbol::Comma);
-                printSpace();
-            }
-        }
-        auto i = ast->args.begin();
-        if (i != ast->args.end()) {
-            visitChild(i[0].get());
-            while (++i != ast->args.end()) {
-                printSymbol(Symbol::Comma);
-                printSpace();
+            printSymbol(Symbol::ParClose);
+        } else { // function or global function pointer type variable call
+            visitChild(ast->function.get());
+            printSymbol(Symbol::ParOpen);
+            auto i = ast->args.begin();
+            if (i != ast->args.end()) {
                 visitChild(i[0].get());
+                while (++i != ast->args.end()) {
+                    printSymbol(Symbol::Comma);
+                    printSpace();
+                    visitChild(i[0].get());
+                }
             }
+            printSymbol(Symbol::ParClose);
         }
-        printSymbol(Symbol::ParClose);
     }
 
     void Transpiler::visit(ASTCast * ast) {

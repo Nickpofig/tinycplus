@@ -14,13 +14,15 @@ namespace tinycpp {
     class Transpiler : public ASTVisitor {
     private: // persistant data
         NamesContext & names_;
+        TypesContext & types_;
         ASTPrettyPrinter printer_;
         bool isPrintColorful_ = false;
     private: // temporary data
         int inheritanceDepth = 0;
     public:
-        Transpiler(NamesContext & names, std::ostream & output, bool isColorful)
+        Transpiler(NamesContext & names, TypesContext & types, std::ostream & output, bool isColorful)
             :names_{names}
+            ,types_{types}
             ,printer_{output}
             ,isPrintColorful_{isColorful}
         { }
@@ -33,17 +35,153 @@ namespace tinycpp {
         void printSymbol(Symbol const & name) { print(name, printer_.symbol);}
         void printIdentifier(Symbol const & name) { print(name, printer_.identifier); }
         void printType(Symbol const & name) { print(name, printer_.type); }
+        void printType(Type * type) {
+            if (isPrintColorful_) printer_ << printer_.type;
+            printer_ << type->toString();
+        }
         void printKeyword(Symbol const & name) { print(name, printer_.keyword); }
-        void printNumber(int64_t value) {
+        template<typename T>
+        void printNumber(T value) {
             if (isPrintColorful_) printer_ << printer_.numberLiteral;
             printer_ << value;
         }
-        void printClassPrefix(Type const * classType) {
-            if (dynamic_cast<Type::Class const *>(classType) == nullptr) {
-                throw std::runtime_error{STR("Expected class type, but got: " << classType->toString() << " type.")};
+        void printComment(std::string const & text) {
+            if (isPrintColorful_) printer_ << printer_.comment;
+            printer_ << "// " << text;
+        }
+        void printVTableInitFunctionDeclaration(Type::Class * classType) {
+            auto vtableType = classType->getVirtualTable();
+            if (vtableType == nullptr) return;
+            auto returnType = types_.getTypeVoid();
+            auto functionName = vtableType->getGlobalInitFunctionName();
+            if (!names_.addGlobalVariable(functionName, returnType)) return;
+            // * return type
+            printType(returnType);
+            printSpace();
+            // * name
+            printIdentifier(functionName);
+            // * arguments
+            printSymbol(Symbol::ParOpen);
+            printSymbol(Symbol::ParClose);
+            printSpace();
+            // * body start
+            printSymbol(Symbol::CurlyOpen);
+            printer_.indent();
+            printer_.newline();
+            {
+                std::vector<std::pair<Symbol, Type::Complex::Member>>  vtableMembers;
+                vtableType->collectMembersOrdered(vtableMembers);
+                int remained = vtableMembers.size();
+                for (auto & member : vtableMembers) {
+                    // e.g ~~> this.vtable->functionPtr = function;
+                    printIdentifier(vtableType->getGlobalInstanceName());
+                    printSymbol(Symbol::Dot);
+                    printIdentifier(member.first);
+                    printSpace();
+                    printSymbol(Symbol::Assign);
+                    printSpace();
+                    auto methodInfo = classType->getMethodInfo(member.first);
+                    printSymbol(Symbol::BitAnd);
+                    printIdentifier(methodInfo.fullName);
+                    printSymbol(Symbol::Semicolon);
+                    if(--remained > 0) {
+                        printer_.newline();
+                    }
+                }
             }
-            if (isPrintColorful_) printer_ << printer_.identifier;
-            printer_ << classType->toString() << "_";
+            // * body end
+            printer_.dedent();
+            printer_.newline();
+            printSymbol(Symbol::CurlyClose);
+            printer_.newline();
+            printer_.newline();
+        }
+        void printComplexTypeConstructorDeclaration(Type::Complex * complexType) {
+            if (!complexType->requiresImplicitConstruction()) return;
+            if (!names_.addGlobalVariable(complexType->getConstructorName(), complexType)) return;
+            // * return type
+            printType(complexType);
+            printSpace();
+            // * name
+            printIdentifier(complexType->getConstructorName());
+            // * arguments
+            printSymbol(Symbol::ParOpen);
+            printSymbol(Symbol::ParClose);
+            printSpace();
+            // * body start
+            printSymbol(Symbol::CurlyOpen);
+            printer_.indent();
+            printer_.newline();
+            {
+                // ** class instance declaration
+                printType(complexType->toString());
+                printSpace();
+                printIdentifier(symbols::KwThis);
+                printSymbol(Symbol::Semicolon);
+                printer_.newline();
+                // ** class instance vtable assignment
+                if (auto * classType = complexType->as<Type::Class>()) {
+                    auto * vtable = classType->getVirtualTable();
+                    if (vtable) {
+                        printIdentifier(vtable->getGlobalInitFunctionName());
+                        printSymbol(Symbol::ParOpen);
+                        printSymbol(Symbol::ParClose);
+                        printer_.newline();
+                    }
+                    printIdentifier(symbols::KwThis);
+                    printSymbol(Symbol::Dot);
+                    printIdentifier(symbols::VTable);
+                    printSpace();
+                    printSymbol(Symbol::Assign);
+                    printSpace();
+                    if (vtable) {
+                        printSymbol(Symbol::BitAnd);
+                        printIdentifier(vtable->getGlobalInstanceName());
+                    } else {
+                        printKeyword(Symbol::KwCast);
+                        printSymbol(Symbol::Lt);
+                        printKeyword(Symbol::KwVoid);
+                        printSymbol(Symbol::Mul);
+                        printSymbol(Symbol::Gt);
+                        printSymbol(Symbol::ParOpen);
+                        printNumber(0);
+                        printSymbol(Symbol::ParClose);
+                    }
+                    printSymbol(Symbol::Semicolon);
+                    printer_.newline();
+                }
+                // ** class instance field construction
+                std::vector<std::pair<Symbol, Type::Complex::Member>> fields;
+                complexType->collectMembersOrdered(fields);
+                for (auto & field : fields) {
+                    auto memberType = field.second.type;
+                    if (memberType->isPointer()) continue;
+                    auto * fieldComplexType = memberType->as<Type::Complex>();
+                    if (fieldComplexType == nullptr) continue;
+                    // e.g ~~> this.field = fieldClassConstructor();
+                    printIdentifier(symbols::KwThis);
+                    printSymbol(Symbol::Dot);
+                    printIdentifier(field.first);
+                    printSpace();
+                    printSymbol(Symbol::Assign);
+                    printSpace();
+                    printIdentifier(fieldComplexType->getConstructorName());
+                    printSymbol(Symbol::ParOpen);
+                    printSymbol(Symbol::ParClose);
+                    printSymbol(Symbol::Semicolon);
+                    printer_.newline();
+                }
+            }
+            // * return class instance
+            printKeyword(Symbol::KwReturn);
+            printSpace();
+            printIdentifier(symbols::KwThis);
+            printSymbol(Symbol::Semicolon);
+            printer_.dedent();
+            printer_.newline();
+            // * body end
+            printSymbol(Symbol::CurlyClose);
+            printer_.newline();
         }
     public:
         void visit(AST * ast) override;

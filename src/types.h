@@ -2,6 +2,7 @@
 
 // standard
 #include <cassert>
+#include <optional>
 
 // internal
 #include "shared.h"
@@ -20,7 +21,7 @@ namespace tinycpp {
         class Complex;
         class Struct;
         class Class;
-        class Method;
+        class VTable;
 
     public:
         virtual ~Type() = default;
@@ -48,9 +49,15 @@ namespace tinycpp {
         template<typename T>
         T * getCore();
 
+        template<typename T>
+        T * as() {
+            return dynamic_cast<T*>(this);
+        }
+
     private:
         virtual void toStream(std::ostream & s) const = 0;
     }; // tinycpp::Type
+
 
     /** A type alias, i.e. a different name for same type.
      */
@@ -183,20 +190,86 @@ namespace tinycpp {
         Keeps a mapping from the fields to their types.
      */
     class Type::Complex : public Type {
+    public:
+        struct Member {
+            Type * type;
+            AST * ast;
+        };
     private:
-        std::unordered_map<Symbol, Type *> members_;
+        std::unordered_map<Symbol, Member> members_;
+        std::vector<Symbol> order_;
+        std::optional<Symbol> constructorName_;
+    protected:
+        void throwMemberIsAlreadyDefined(Symbol name, AST * ast) {
+            throw ParserError{
+                STR("Member " << name.name() << " already defined "),
+                ast->location()
+            };
+        }
+        void checkMemberTypeIsFullyDefined(Symbol & name, Type * type, AST * ast) {
+            if (!type->isFullyDefined()) throw ParserError{
+                STR("Member " << name.name() << " has not fully defined type " << type->toString()),
+                ast->location()
+            };
+        }
     public:
         virtual void registerMember(Symbol name, Type * type, AST * ast) {
-            if (!type->isFullyDefined())
-                throw ParserError{STR("Member " << name.name() << " has not fully defined type " << type->toString()), ast->location()};
-            if (members_.find(name) != members_.end())
-                throw ParserError{STR("Member " << name.name() << " already defined "), ast->location()};
-            members_.insert(std::make_pair(name, type));
+            checkMemberTypeIsFullyDefined(name, type, ast);
+            if (members_.find(name) != members_.end()) { 
+                throwMemberIsAlreadyDefined(name, ast);
+            }
+            members_.insert(std::make_pair(name, Member{type, ast}));
+            order_.push_back(name);
+        }
+
+        void overrideMember(Symbol name, Type * type, AST * ast) {
+            checkMemberTypeIsFullyDefined(name, type, ast);
+            if (members_.find(name) == members_.end()) { 
+                throwMemberIsAlreadyDefined(name, ast);
+            }
+            members_[name] = Member{type, ast};
         }
 
         virtual Type * getMemberType(Symbol name) const {
             auto it = members_.find(name);
-            return it == members_.end() ? nullptr : it->second;
+            return it == members_.end() ? nullptr : it->second.type;
+        }
+
+        virtual AST * getMemberDeclaration(Symbol name) const {
+            auto it = members_.find(name);
+            return it == members_.end() ? nullptr : it->second.ast;
+        }
+
+        virtual bool requiresImplicitConstruction() const {
+            for (auto & member : members_) {
+                auto * memberType = member.second.type;
+                if (memberType->isPointer()) continue;
+                if (auto * complexMemberType = memberType->as<Type::Complex>();
+                    complexMemberType != nullptr && complexMemberType->requiresImplicitConstruction()
+                ) return true;
+            }
+            return false;
+        }
+
+    public:
+        Symbol getConstructorName() {
+            if (!constructorName_.has_value()) {
+                constructorName_ = Symbol{STR("__tinycpp__make__" << toString())};
+            }
+            return constructorName_.value();
+        }
+
+        void copyMembersTo(Type::Complex * other) {
+            for (auto & name : order_) {
+                other->members_.insert({name, members_[name]});
+                other->order_.push_back(name);
+            }
+        }
+
+        void collectMembersOrdered(std::vector<std::pair<Symbol, Member>> & result) {
+            for (auto & name : order_) {
+                result.push_back({name, members_[name]});
+            }
         }
     }; // tinycpp::Type::Complex
 
@@ -236,14 +309,47 @@ namespace tinycpp {
     }; // tinycpp::Type::Struct
 
 
+    class Type::VTable : public Type::Complex {
+    private:
+        Symbol name_;
+    public:
+        VTable(Symbol name): name_{name} { }
+    public:
+        Symbol getGlobalInstanceName() {
+            return Symbol{STR(name_.name() << "instance__")};
+        }
+        Symbol getGlobalInitFunctionName() {
+            return Symbol{STR(name_.name() << "init__")};
+        }
+
+        bool requiresImplicitConstruction() const override {
+            return false;
+        }
+    private:
+        friend class TypeChecker;
+        void toStream(std::ostream & s) const override {
+            s << name_.name();
+        }
+    };
+
     /** Structure declaration.
      * 
         Keeps a mapping from the fields and methods to their types and the AST where the type was declared.
      */
     class Type::Class : public Type::Complex {
+    public:
+        struct MethodInfo {
+            Symbol name;
+            Symbol fullName;
+            Type::Function * type;
+            Type::Class * targetClassType;
+            ASTMethodDecl * ast;
+        };
     private:
         ASTClassDecl * ast_;
-        Type::Class * base_ = nullptr; 
+        Type::Class * base_ = nullptr;
+        Type::VTable * vtable_ = nullptr;
+        std::vector<MethodInfo> methods_;
     public:
         Class(ASTClassDecl * ast):
             ast_{ast} {
@@ -253,23 +359,32 @@ namespace tinycpp {
             return ast_;
         }
 
-        /** Struct type is fully defined if its ast the definition, not just forward declaration of the type.
-         */
-        bool isFullyDefined() const override {
-            return ast_ != nullptr && ast_->isDefinition;
-        }
-
-        Type::Class * getBase() {
+        Type::Class * getBase() const {
             return base_;
         }
 
-        void setBase(Type * type) {
-            base_ = dynamic_cast<Type::Class *>(type);
-            if (!base_) {
-                throw std::runtime_error(STR("[T1] A type: " << (type ? type->toString() : "null") 
-                    << " - is not an instance of class type.")
-                );
+        void setBase(Type::Class * type) {
+            if (!type->isFullyDefined()) throw ParserError{
+                STR("[T2] A base type must be fully defined before inherited."),
+                ast_->location()
+            };
+            base_ = type;
+            vtable_ = type->vtable_;
+        }
+
+        Type::VTable * getVirtualTable() const {
+            return vtable_;
+        }
+
+        void setVirtualTable(Type::VTable * type) {
+            if (vtable_ != nullptr) {
+                vtable_->copyMembersTo(type);
             }
+            vtable_ = type;
+        }
+
+        bool hasOwnVirtualTable() {
+            return vtable_ != nullptr && (base_ == nullptr || base_->vtable_ != vtable_);
         }
 
         void updateDefinition(ASTClassDecl * ast) {
@@ -277,61 +392,111 @@ namespace tinycpp {
             ast_ = ast;
         }
 
-    public:
-        void registerMember(Symbol name, Type * type, AST * ast) override {
-            if (auto * type = getMemberType(name); type != nullptr) {
-                throw ParserError{
-                    STR("Member with name \"" << name.name() << "\""
-                        << " is declared the second time (which is not allowed!)"
-                        << " in class \"" << toString() << "\""),
-                    ast->location()
-                };
+        bool hasMethod(Symbol name, bool includeBaseInSearch) const {
+            for (auto & method : methods_) {
+                if (method.name == name) {
+                    return true;
+                }
             }
-            Type::Complex::registerMember(name, type, ast);
+            if (includeBaseInSearch && base_ != nullptr) {
+                return base_->hasMethod(name, true);
+            }
+            return false;
+        }
+
+        MethodInfo getMethodInfo(Symbol name) const {
+            for (auto & method : methods_) {
+                if (method.name == name) {
+                    return method;
+                }
+            }
+            if (base_ != nullptr) {
+                return base_->getMethodInfo(name);
+            }
+            throw ParserError {
+                STR("There is no method with name: " << name.name()),
+                ast_->location()
+            };
+        }
+
+    public: // overrides
+        /** Struct type is fully defined if its ast the definition, not just forward declaration of the type.
+         */
+        bool isFullyDefined() const override {
+            return ast_ != nullptr && ast_->isDefinition;
+        }
+
+        void registerMember(Symbol name, Type * type, AST * ast) override {
+            auto * method = ast->as<ASTMethodDecl>();
+            if (method != nullptr) {
+                if (hasMethod(name, false)) {
+                    throwMemberIsAlreadyDefined(name, ast);
+                }
+                if (method->isOverride()) {
+                    if (base_ == nullptr) throw ParserError{
+                        STR("There is no base class to override"),
+                        ast->location()
+                    };
+                    if (!base_->hasMethod(name, true)) throw ParserError{
+                        STR("There is no base method called " << name << " to override"),
+                        ast->location()
+                    };
+                    // reassigning new override implementation
+                }
+                bool isVirtual = method->isVirtual();
+                auto fullName = Symbol{
+                    STR("__tinycpp__" << toString() << (isVirtual ? "__virtual__" : "__") << name.name())
+                };
+                methods_.push_back(MethodInfo{name, fullName, type->as<Type::Function>(), this, method});
+            }
+            else {
+                if (auto * type = getMemberType(name); type != nullptr) {
+                    throwMemberIsAlreadyDefined(name, ast);
+                }
+                Type::Complex::registerMember(name, type, ast);
+            }
+        }
+
+        bool requiresImplicitConstruction() const override {
+            return true;
         }
 
         Type * getMemberType(Symbol name) const override {
             auto * type = Type::Complex::getMemberType(name);
+            if (type == nullptr) {
+                for (auto & method : methods_) {
+                    if (method.name == name) {
+                        return method.type;
+                    }
+                }
+            }
             if (type == nullptr && base_ != nullptr) {
                 type = base_->getMemberType(name);
             }
             return type;
         }
 
+        AST * getMemberDeclaration(Symbol name) const override {
+            auto * ast = Type::Complex::getMemberDeclaration(name);
+            if (ast == nullptr) {
+                for (auto & method : methods_) {
+                    if (method.name == name) {
+                        return method.ast;
+                    }
+                }
+            }
+            if (ast == nullptr && base_ != nullptr) {
+                ast = base_->getMemberDeclaration(name);
+            }
+            return ast;
+        }
+
     private:
         friend class TypeChecker;
-
         void toStream(std::ostream & s) const override {
             s << ast_->name.name();
         }
     }; // tinycpp::Type::Class
-
-
-    /** Structure declaration.
-     * 
-        Keeps a reference to class type and everything that Function type has.
-     */
-    class Type::Method : public Function {
-    public:
-        Type * classType;
-    public:
-        Method(Type * returnType, Type * classType): Function{returnType}, classType{classType} { }
-    private:
-        void toStream(std::ostream & s) const override {
-            returnType_->toStream(s);
-            s << " (";
-            auto i = args_.begin();
-            auto e = args_.end();
-            if (i != e) {
-                (*i)->toStream(s);
-                while (++i != e) {
-                    s << ", ";
-                    (*i)->toStream(s);
-                }
-            }
-            s << ")";
-        }
-    }; // tinycpp::Type::Method
 
 
     template<typename T>

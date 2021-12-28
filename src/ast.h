@@ -32,21 +32,21 @@ namespace tinycpp {
 
     // [*] Hierarchy information
     public:
-        AST * parentAST = nullptr;
+        AST * parent = nullptr;
         template<typename T>
         T * findParent(std::optional<int> depth = std::nullopt) {
-            if (parentAST == nullptr) return nullptr;
-            if (auto result = dynamic_cast<T*>(parentAST)) return result;
+            if (parent == nullptr) return nullptr;
+            if (auto result = dynamic_cast<T*>(parent)) return result;
             if (depth.has_value()) {
-                if (depth.value() > 0) return parentAST->findParent<T>(depth.value() - 1);
+                if (depth.value() > 0) return parent->findParent<T>(depth.value() - 1);
                 else return nullptr;
             }
-            return parentAST->findParent<T>();
+            return parent->findParent<T>();
         }
 
         bool isDescendentOf(AST * ancestor) {
             if (this == ancestor) return true;
-            if (parentAST != nullptr) return parentAST->isDescendentOf(ancestor);
+            if (parent != nullptr) return parent->isDescendentOf(ancestor);
             return false;
         }
 
@@ -363,6 +363,31 @@ namespace tinycpp {
 
     };
 
+    class ASTFunPtrDecl : public AST {
+    public:
+        std::unique_ptr<ASTIdentifier> name;
+        std::vector<std::unique_ptr<ASTType>> args;
+        std::unique_ptr<ASTType> returnType;
+    public:
+        ASTFunPtrDecl(Token const & t, std::unique_ptr<ASTIdentifier> name, std::unique_ptr<ASTType> returnType):
+            AST{t},
+            name{std::move(name)},
+            returnType{std::move(returnType)} {
+        }
+    public:
+        void print(ASTPrettyPrinter & p) const override {
+            p << p.keyword << "typedef " << (*returnType) << p.symbol << "( *" << (*name) << p.symbol << ")(";
+            auto i = args.begin();
+            if (i != args.end()) {
+                p << **i;
+                while (++i != args.end())
+                    p << p.symbol << ", " << **i;
+            }
+            p << p.symbol << ")";
+        }
+    protected:
+        void accept(ASTVisitor * v) override;
+    };
 
     class ASTFunDecl : public AST {
     public:
@@ -387,10 +412,8 @@ namespace tinycpp {
             }
             p << p.symbol << ")" << (*body);
         }
-
     protected:
         void accept(ASTVisitor * v) override;
-
     };
 
     class ASTStructDecl : public AST {
@@ -509,35 +532,6 @@ namespace tinycpp {
         void accept(ASTVisitor * v) override;
 
     }; // class ASTClassDecl
-
-    class ASTFunPtrDecl : public AST {
-    public:
-        std::unique_ptr<ASTIdentifier> name;
-        std::vector<std::unique_ptr<ASTType>> args;
-        std::unique_ptr<ASTType> returnType;
-
-        ASTFunPtrDecl(Token const & t, std::unique_ptr<ASTIdentifier> name, std::unique_ptr<ASTType> returnType):
-            AST{t},
-            name{std::move(name)},
-            returnType{std::move(returnType)} {
-        }
-
-
-        void print(ASTPrettyPrinter & p) const override {
-            p << p.keyword << "typedef " << (*returnType) << p.symbol << "( *" << (*name) << p.symbol << ")(";
-            auto i = args.begin();
-            if (i != args.end()) {
-                p << **i;
-                while (++i != args.end())
-                    p << p.symbol << ", " << **i;
-            }
-            p << p.symbol << ")";
-        }
-
-    protected:
-        void accept(ASTVisitor * v) override;
-
-    };
 
     class ASTIf : public AST {
     public:
