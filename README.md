@@ -3,16 +3,14 @@ Transpiler from Object-Oriented extension TinyC+ to TinyC programming lamguage.
 
 # Language Reference
 
-    PROGRAM := { FUN_DECL | VAR_DECLS ';' | STRUCT_DECL | FUNPTR_DECL }
+    PROGRAM := { FUN_DECL | VAR_DECLS ';' | STRUCT_DECL | FUNPTR_DECL | CLASS_DECL }
 
-A program is collection of function and variable declarations. Alternatively, *tinyC* supports a repl-like interface, where the main element is either a program, or a stetement:
-
-    REPL := STATEMENT | PROGRAM
-
+A program is collection of ordered function, type, and variable declarations. Order is defined by dependency of declarations on each other: a declaration happens before its use.
 
 ### Functions
 
-    FUN_DECL := TYPE_FUN_RET identifier '(' [ FUN_ARG { ',' FUN_ARG } ] ')' [ BLOCK_STMT ]
+    FUN_DECL := FUN_HEAD [ BLOCK_STMT ]
+    FUN_HEAD := TYPE_FUN_RET identifier '(' [ FUN_ARG { ',' FUN_ARG } ] ')'
     FUN_ARG := TYPE identifier
 
 Functions are declared the same way as in C. A function definition starts with the return type, followed by function name and arguments. Arguments have type and name. Default values or variadic arguments are not supported. Functions can be declared or defined. Function definitions must have their body.
@@ -53,19 +51,29 @@ Pointers can point to either a plain type, an identifier representing a struct o
 
 ### Type Declarations
 
-    STRUCT_DECL := 'struct' identifier [ '{' { TYPE identifier ';' } '}' ] ';'
+    FIELD_DECL := TYPE identifier ';'
+    STRUCT_DECL := 'struct' identifier [ '{' { FIELD_DECL } '}' ] ';'
 
 Structured types must always be declared before they are used. Forward declarations are supported as well.
 
-    CLASS_DECL := 'class' identifier [ '{' { TYPE identifier ';' | FUN_DECL } '}' ] ';'
+    CLASS_DECL := 'class' identifier [ : identifier ] [ '{' { FIELD_DECL | METHOD_DECL } '}' ] ';'
+    METHOD_DECL := FUN_HEAD [ 'virtual' | 'override'] [ BLOCK_STMT ]
 
-To access class members (fields/methods) the "this" implicit variable of pointer type must be used.
-When translated to TinyC, "this" is a pointer to 'owner' object with corresponding type.
+Class is similar to struct, except it:
+    * could inherit all content of its base type.
+    * could declare special function - "method" that associates with the class: thus accessed only via "." or "->" operator over its class intance.
+Method is similiar to function, except it:
+    * operates on a class instance via implicitly declared "this" and "base" variable without the instance being an argument.
+    * could be redefinied in a class that inherits its class via use of "override" keyword if it was declared as "virtual".
+The "this" variable is a pointer to instance of method's class.
+The "base" variable is same as "this" variable, except its type is a pointer to base class of method's class. 
 
     FUNPTR_DECL := typedef TYPE_FUN_RET '(' '*' identifier ')' '(' [ TYPE { ',' TYPE } ] ')' ';'
 
-Function pointers must always be declared before they can be used.
-
+Function pointer types must always be declared before they can be used. Function pointer type could represent a method iff:
+    * the return type matches the method's return type.
+    * the first argument is pointer to the methods'class instance.
+    * the rest of argument types equal to method's argument types with respect to order.
 
 ### Expressions
 
@@ -108,4 +116,4 @@ Expressions can be separated by a comma, they will be evaluated left to right.
 
 Variable declaration must start with a type specification. Multiple variables of same type cannot be declared in a single expression, but multiple comma separated declarations with explicit type are allowed.
 
-Optionally, arrays of statically known size may be defined with `[]` operator after the variable name.
+Optionally, arrays of statically known size may be defined with `[]` operator after the variable or field name.

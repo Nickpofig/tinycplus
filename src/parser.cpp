@@ -60,9 +60,12 @@ namespace tinycpp {
         return PROGRAM();
     }
 
-    /* FUN_DECL := TYPE_FUN_RET identifier '(' [ FUN_ARG { ',' FUN_ARG } ] ')' [ BLOCK_STMT ]
+    /*
         FUN_ARG := TYPE identifier
-        */
+        FUN_HEAD := TYPE_FUN_RET identifier '(' [ FUN_ARG { ',' FUN_ARG } ] ')'
+        FUN_DECL := FUN_HEAD [ BLOCK_STMT ]
+        METHOD_DECL := FUN_HEAD [ 'virtual' | 'override' ] [ BLOCK_STMT ]
+    */
     std::unique_ptr<AST> Parser::FUN_DECL(bool isMethod) {
         std::unique_ptr<ASTType> type{TYPE_FUN_RET()};
         if (!isIdentifier(top()))
@@ -322,7 +325,7 @@ namespace tinycpp {
         return decl;
     }
 
-    /* FUNPTR_TYPE_DECL := typedef TYPE_FUN_RET '(' '*' identifier ')' '(' [ TYPE { ',' TYPE } ] ')' ';'
+    /* FUNPTR_TYPE_DECL := 'typedef' TYPE_FUN_RET '(' '*' identifier ')' '(' [ TYPE { ',' TYPE } ] ')' ';'
         */
     std::unique_ptr<ASTFunPtrDecl> Parser::FUNPTR_DECL() {
         Token const & start = pop(Symbol::KwTypedef);
@@ -344,7 +347,7 @@ namespace tinycpp {
         return result;
     }
 
-    /* CLASS_DECL := 'class' TODO
+    /* CLASS_DECL := 'class' identifier [ : identifier ] [ '{' { TYPE identifier ';' | FUN_DECL } '}' ] ';'
         */
     std::unique_ptr<ASTClassDecl> Parser::CLASS_DECL() {
         auto const & start = pop(symbols::KwClass);
