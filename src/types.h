@@ -222,7 +222,7 @@ namespace tinycpp {
             order_.push_back(name);
         }
 
-        void overrideMember(Symbol name, Type * type, AST * ast) {
+        virtual void overrideMember(Symbol name, Type * type, AST * ast) {
             checkMemberTypeIsFullyDefined(name, type, ast);
             members_[name] = Member{type, ast};
         }
@@ -401,7 +401,7 @@ namespace tinycpp {
             return false;
         }
 
-        MethodInfo getMethodInfo(Symbol name) const {
+        MethodInfo getMethodInfo(Symbol name, bool searchInBase = true) const {
             for (auto & method : methods_) {
                 if (method.name == name) {
                     return method;
@@ -426,7 +426,11 @@ namespace tinycpp {
         void registerMember(Symbol name, Type * type, AST * ast) override {
             auto * method = ast->as<ASTMethodDecl>();
             if (method != nullptr) {
-                if (hasMethod(name, false)) {
+                bool isRedeclaring = hasMethod(name, false);
+                if (isRedeclaring
+                    && !getMethodInfo(name, false).ast->body
+                    && !method->body
+                ) {
                     throwMemberIsAlreadyDefined(name, ast);
                 }
                 if (method->isOverride()) {
@@ -444,7 +448,16 @@ namespace tinycpp {
                 auto fullName = Symbol{
                     STR("__tinycpp__" << toString() << (isVirtual ? "__virtual__" : "__") << name.name())
                 };
-                methods_.push_back(MethodInfo{name, fullName, type->as<Type::Function>(), this, method});
+                if (isRedeclaring) {
+                    for (auto & it : methods_) {
+                        if (it.name == name) {
+                            it = MethodInfo{name, fullName, type->as<Type::Function>(), this, method};
+                            break;
+                        }
+                    }
+                } else {
+                    methods_.push_back(MethodInfo{name, fullName, type->as<Type::Function>(), this, method});
+                }
             }
             else {
                 if (auto * type = getMemberType(name); type != nullptr) {

@@ -186,11 +186,11 @@ namespace tinycpp {
             }
         }
         if (ast->body) {
-            if (classType->getMemberType(methodName) == nullptr) {
-                classType->registerMember(methodName, t, ast);
-            } else {
-                classType->overrideMember(methodName, t, ast);
-            }
+            // if (classType->getMemberType(methodName) == nullptr) {
+            // } else {
+            //     classType->overrideMember(methodName, t, ast);
+            // }
+            classType->registerMember(methodName, t, ast);
             // enters the context and add all arguments as local variables
             names_.enterFunctionScope(t->returnType());
             {
