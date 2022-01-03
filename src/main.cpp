@@ -20,9 +20,32 @@ namespace program_errors {
 // declaration for extern Entry
 tiny::Symbol tinycpp::symbols::Entry = tinycpp::symbols::NoEntry;
 
+const std::string keyColorful = "--colorful";
+const std::string keyEntry = "--entry";
+
+void checkForHelpRequest(int argc, char** argv) {
+    const std::string tab {"    "};
+    for (int i = 1; i < argc; ++i) {
+        std::string arg{argv[i]};
+        if (arg == "--help" || arg == "-h") {
+            std::cerr << "Help:" << std::endl
+                << tab
+                << "Program always expects one of the arguments to be a filepath to the TinyC+ source code."
+                << std::endl;
+            std::cerr << "Available arguments:" << std::endl;
+            std::cerr << tab << keyColorful << " -> "
+                << "when set to [true] prints TinyC output in color."
+                << std::endl;
+            std::cerr << tab << keyEntry << " -> "
+                << "sets the entry point for TinyC output program."
+                << std::endl;
+            exit(EXIT_SUCCESS);
+        }
+    }
+}
+
 int main(int argc, char ** argv) {
-    const std::string keyColorful = "--colorful";
-    const std::string keyEntry = "--entry";
+    checkForHelpRequest(argc, argv);
     tiny::config.parse(argc, argv);
     tiny::config.setDefaultIfMissing(keyColorful, "false");
     tiny::config.setDefaultIfMissing(keyEntry, tinycpp::symbols::NoEntry.name());
