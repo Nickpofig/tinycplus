@@ -8,8 +8,6 @@
 
 namespace tinycpp {
 
-    /// TODO: enforce use of "this" keyword or somehow define that a variable exist in a context of a transpiled tinyc code
-
     void Transpiler::visit(AST * ast) {
          visitChild(ast);
     }
@@ -125,7 +123,9 @@ namespace tinycpp {
             printSpace();
             visitChild(ast->value.get());
         } else if (auto * complexType = ast->getType()->as<Type::Complex>();
-            complexType != nullptr && ast->parent->as<ASTSequence>()
+            complexType != nullptr
+            && complexType->requiresImplicitConstruction()
+            && ast->parent->as<ASTSequence>()
         ) {
             printSpace();
             printSymbol(Symbol::Assign);
@@ -137,12 +137,13 @@ namespace tinycpp {
     }
 
     void Transpiler::visit(ASTFunDecl * ast) {
-        // * method return type
+        // * function return type
         visitChild(ast->typeDecl.get());
         printSpace();
-        // * method name
+        // * function name
         printIdentifier(ast->name.name());
-        // * method arguments
+        registerDeclaration(ast->name.name(), ast->name.name(), 1);
+        // * function arguments
         printSymbol(Symbol::ParOpen);
         auto arg = ast->args.begin();
         if (arg != ast->args.end()) {
@@ -154,9 +155,13 @@ namespace tinycpp {
             }
         }
         printSymbol(Symbol::ParClose);
-        printSpace();
-        // * method body
-        visitChild(ast->body.get());
+        // * function body
+        if (ast->body) {
+            printSpace();
+            visitChild(ast->body.get());
+        } else {
+            printSymbol(Symbol::Semicolon);
+        }
     }
 
     void Transpiler::visit(ASTStructDecl * ast) {
@@ -176,6 +181,7 @@ namespace tinycpp {
             printSymbol(Symbol::CurlyClose);
             printSymbol(Symbol::Semicolon);
         }
+        printer_.newline();
         printComplexTypeConstructorDeclaration(ast->getType()->as<Type::Complex>());
     }
 
@@ -312,6 +318,7 @@ namespace tinycpp {
         // * method name
         auto classType = classParent->getType()->as<Type::Class>();
         auto info = classType->getMethodInfo(ast->name);
+        registerDeclaration(info.fullName, ast->name, 1);
         printIdentifier(info.fullName);
         // * method arguments
         printSymbol(Symbol::ParOpen);
@@ -334,9 +341,13 @@ namespace tinycpp {
             }
         }
         printSymbol(Symbol::ParClose);
-        printSpace();
         // * method body
-        visitChild(ast->body.get());
+        if (ast->body) {
+            printSpace();
+            visitChild(ast->body.get());
+        } else {
+            printSymbol(Symbol::Semicolon);
+        }
     }
 
     void Transpiler::visit(ASTFunPtrDecl * ast) {
@@ -344,9 +355,9 @@ namespace tinycpp {
         // return type
         printSpace();
         visitChild(ast->returnType.get());
+        printSpace();
         // name as pointer
         printSymbol(Symbol::ParOpen);
-        printSpace();
         printSymbol(Symbol::Mul);
         visitChild(ast->name.get());
         printSymbol(Symbol::ParClose);
@@ -362,6 +373,7 @@ namespace tinycpp {
             }
         }
         printSymbol(Symbol::ParClose);
+        printSymbol(Symbol::Semicolon);
     }
 
     void Transpiler::visit(ASTIf * ast) {
@@ -521,7 +533,6 @@ namespace tinycpp {
         auto * ident = ast->function->as<ASTIdentifier>();
         auto * member = ast->parent->as<ASTMember>();
         if (member != nullptr && !ident->getType()->isPointer()) { // method call
-            /// TODO: handle the case where target is struct type and member to call is function pointer
             auto targetType = member->base->getType();
             auto * classType = targetType->getCore<Type::Class>();
             auto methodInfo = classType->getMethodInfo(ident->name);
@@ -541,9 +552,6 @@ namespace tinycpp {
             printSymbol(Symbol::ParOpen);
             {
                 // * target as the first argument
-                if (member->op == Symbol::Dot) {
-                    printSymbol(Symbol::BitAnd);
-                }
                 if (classType != targetClassType) {
                     // downcasts because method belonfs to base class
                     printKeyword(Symbol::KwCast);
@@ -552,14 +560,14 @@ namespace tinycpp {
                     printType(Symbol::Mul);
                     printSymbol(Symbol::Gt);
                     printSymbol(Symbol::ParOpen);
-                    if (!targetType->isPointer()) {
+                    if (member->op == Symbol::Dot) {
                         printSymbol(Symbol::BitAnd);
                     }
                     visitChild(member->base.get());
                     printSymbol(Symbol::ParClose);
                 } else {
                     // no cast
-                    if (!targetType->isPointer()) {
+                    if (member->op == Symbol::Dot) {
                         printSymbol(Symbol::BitAnd);
                     }
                     visitChild(member->base.get());

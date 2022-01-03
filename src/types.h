@@ -224,9 +224,6 @@ namespace tinycpp {
 
         void overrideMember(Symbol name, Type * type, AST * ast) {
             checkMemberTypeIsFullyDefined(name, type, ast);
-            if (members_.find(name) == members_.end()) { 
-                throwMemberIsAlreadyDefined(name, ast);
-            }
             members_[name] = Member{type, ast};
         }
 

@@ -17,6 +17,7 @@ namespace tinycpp {
         TypesContext & types_;
         ASTPrettyPrinter printer_;
         bool isPrintColorful_ = false;
+        std::unordered_map<Symbol, int> definitions;
     private: // temporary data
         int inheritanceDepth = 0;
     public:
@@ -27,6 +28,17 @@ namespace tinycpp {
             ,isPrintColorful_{isColorful}
         { }
     private:
+        void registerDeclaration(Symbol realName, Symbol name, int definitionsLimit = 0) {
+            auto result = definitions.find(realName);
+            if (result == definitions.end()) {
+                definitions.insert(std::make_pair(realName, definitionsLimit));
+            } else {
+                auto & limit = definitions.at(realName);
+                if (--limit < 0) {
+                    throw std::runtime_error{STR("Multiple redefinitions of " << name)};
+                }
+            }
+        }
         inline void print(Symbol const & symbol, tiny::color color) {
             if (isPrintColorful_) printer_ << color;
             printer_ << symbol.name();

@@ -99,8 +99,11 @@ namespace tinycpp {
             }
         }
         // if there is body, parse it, otherwise leave empty as it is just a declaration
-        if (top() == Symbol::CurlyOpen)
+        if (top() == Symbol::CurlyOpen) {
             result->body = BLOCK_STMT();
+        } else {
+            assert(condPop(Symbol::Semicolon));
+        }
         return result;
     }
 
@@ -291,8 +294,9 @@ namespace tinycpp {
                 result.reset(new ASTNamedType{pop()});
             else if (isIdentifier(top()) && isTypeName(top().valueSymbol()))
                 result.reset(new ASTNamedType{pop()});
-            else
+            else {
                 throw ParserError(STR("Expected type, but " << top() << " found"), top().location(), eof());
+            }
         }
         // deal with pointers to pointers
         while (top() == Symbol::Mul)

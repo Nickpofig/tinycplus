@@ -130,20 +130,26 @@ namespace tinycpp {
         }
         // registers function type
         auto * t = types_.getOrCreateFunctionType(std::move(ftype));
-        addVariable(ast, ast->name, t);
+        try {
+            addVariable(ast, ast->name, t);
+        } catch(std::exception e) {
+            // do nothing
+        }
         ast->setType(t);
         // enters the context and add all arguments as local variables
-        names_.enterFunctionScope(t->returnType());
-        {
-            for (auto & i : ast->args) {
-                names_.addVariable(i->name->name, i->type->getType());
+        if (ast->body) {
+            names_.enterFunctionScope(t->returnType());
+            {
+                for (auto & i : ast->args) {
+                    names_.addVariable(i->name->name, i->type->getType());
+                }
+                // typecheck the function body
+                auto * actualReturn = visitChild(ast->body);
+                checkReturnType(t, actualReturn, ast);
             }
-            // typecheck the function body
-            auto * actualReturn = visitChild(ast->body);
-            checkReturnType(t, actualReturn, ast);
+            // leaves the function context
+            names_.leaveCurrentScope();
         }
-        // leaves the function context
-        names_.leaveCurrentScope();
     }
 
 
@@ -179,23 +185,31 @@ namespace tinycpp {
                 vtable->registerMember(methodName, vtableMemberType, ast);
             }
         }
-        classType->registerMember(methodName, t, ast);
-        // enters the context and add all arguments as local variables
-        names_.enterFunctionScope(t->returnType());
-        {
-            names_.addVariable(symbols::KwThis, types_.getOrCreatePointerType(classType));
-            if (auto * base = classType->getBase()) {
-                names_.addVariable(symbols::KwBase, types_.getOrCreatePointerType(classType->getBase()));
+        if (ast->body) {
+            if (classType->getMemberType(methodName) == nullptr) {
+                classType->registerMember(methodName, t, ast);
+            } else {
+                classType->overrideMember(methodName, t, ast);
             }
-            for (auto & i : ast->args) {
-                names_.addVariable(i->name->name, i->type->getType());
+            // enters the context and add all arguments as local variables
+            names_.enterFunctionScope(t->returnType());
+            {
+                names_.addVariable(symbols::KwThis, types_.getOrCreatePointerType(classType));
+                if (auto * base = classType->getBase()) {
+                    names_.addVariable(symbols::KwBase, types_.getOrCreatePointerType(classType->getBase()));
+                }
+                for (auto & i : ast->args) {
+                    names_.addVariable(i->name->name, i->type->getType());
+                }
+                // typecheck the method body
+                auto * actualReturn = visitChild(ast->body);
+                checkReturnType(t, actualReturn, ast);
             }
-            // typecheck the function body
-            auto * actualReturn = visitChild(ast->body);
-            checkReturnType(t, actualReturn, ast);
+            // leaves the method context
+            names_.leaveCurrentScope();
+        } else {
+            classType->registerMember(methodName, t, ast);
         }
-        // leaves the function context
-        names_.leaveCurrentScope();
     }
 
     /** Type checking a structure declaration creates the type.
@@ -483,19 +497,27 @@ namespace tinycpp {
 
     void TypeChecker::visit(ASTCall * ast) {
         int methodOffset = 0;
-        if (auto context = pop<Context::Member>(); context.has_value()) {
+        auto context = pop<Context::Member>();
+        if (context.has_value() && context->memberBaseType->getCore<Type::Class>()) {
             methodOffset = 1;
             auto * ident = dynamic_cast<ASTIdentifier*>(ast->function.get());
             auto * methodType = context.value().memberBaseType->getMemberType(ident->name);
             ident->setType(methodType);
         } else {
+            if (context.has_value()) push(context.value());
             visitChild(ast->function);
         }
         Type::Function const * f = asFunctionType(ast->function->getType());
         if (f == nullptr)
             throw ParserError{STR("Expected function, but value of " << ast->function->getType()->toString() << " found"), ast->location()};
-        if (ast->args.size() != f->numArgs() - methodOffset)
-            throw ParserError{STR("Function of type " << f->toString() << " requires " << f->numArgs() << " arguments, but " << ast->args.size() << " given"), ast->location()};
+        if (ast->args.size() != f->numArgs() - methodOffset) {
+            throw ParserError{
+                STR("Function of type " << f->toString() << " requires "
+                    << f->numArgs() - methodOffset
+                    << " arguments, but " << ast->args.size() << " given"),
+                ast->location()
+            };
+        }
         for (size_t i = 0; i < ast->args.size(); ++i) {
             auto * argType = visitChild(ast->args[i]);
             auto * expectedArgType = f->argType(i + methodOffset);
