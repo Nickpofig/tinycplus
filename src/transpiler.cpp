@@ -106,6 +106,7 @@ namespace tinycpp {
     }
 
     void Transpiler::visit(ASTVarDecl * ast) {
+        validatedName(ast->name->name);
         if (auto arrayType = ast->type->as<ASTArrayType>()) {
             // base type part
             visitChild(arrayType->base.get());
@@ -144,6 +145,7 @@ namespace tinycpp {
     }
 
     void Transpiler::visit(ASTFunDecl * ast) {
+        validatedName(ast->name);
         // * function return type
         visitChild(ast->typeDecl.get());
         printSpace();
@@ -172,6 +174,7 @@ namespace tinycpp {
     }
 
     void Transpiler::visit(ASTStructDecl * ast) {
+        validatedName(ast->name);
         printKeyword(Symbol::KwStruct);
         printSpace();
         printIdentifier(ast->name.name());
@@ -193,6 +196,7 @@ namespace tinycpp {
     }
 
     void Transpiler::visit(ASTClassDecl * ast) {
+        validatedName(ast->name);
         bool isProcessingSelf = inheritanceDepth == 0;
         auto * classType = dynamic_cast<Type::Class*>(ast->getType());
         auto * vtableType = classType->getVirtualTable();
@@ -318,6 +322,7 @@ namespace tinycpp {
 
 
     void Transpiler::visit(ASTMethodDecl * ast) {
+        validatedName(ast->name);
         auto * classParent = ast->findParent<ASTClassDecl>();
         assert(classParent && "must have an ast class decl as parent ast");
         // * method return type
@@ -359,6 +364,7 @@ namespace tinycpp {
     }
 
     void Transpiler::visit(ASTFunPtrDecl * ast) {
+        validatedName(ast->name->name);
         printKeyword(Symbol::KwTypedef);
         // return type
         printSpace();

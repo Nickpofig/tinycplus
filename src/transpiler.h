@@ -39,6 +39,12 @@ namespace tinycpp {
                 }
             }
         }
+        void validatedName(Symbol const & name) {
+            auto foundFrom = name.name().find("__tinycpp__");
+            if (foundFrom == 0) {
+                throw std::runtime_error{STR("Name can't start with \"__tinycpp__\" prefix!")};
+            }
+        }
         inline void print(Symbol const & symbol, tiny::color color) {
             if (isPrintColorful_) printer_ << color;
             printer_ << symbol.name();
