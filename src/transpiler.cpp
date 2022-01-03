@@ -86,7 +86,14 @@ namespace tinycpp {
         for (auto & i : ast->body) {
             printer_.newline();
             visitChild(i.get());
-            if (ast->parent != nullptr && !i->as<ASTFunDecl>()) {
+            if (ast->parent != nullptr
+                && !i->as<ASTFunDecl>()
+                && !i->as<ASTBlock>()
+                && !i->as<ASTIf>()
+                && !i->as<ASTSwitch>()
+                && !i->as<ASTWhile>()
+                && !i->as<ASTFor>()
+            ) {
                 printSymbol(Symbol::Semicolon);
             }
         }
