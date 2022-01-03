@@ -199,6 +199,7 @@ namespace tinycpp {
                 vtableType->collectMembersOrdered(vtableMembers);
                 // ** function pointer types
                 for (auto & it : vtableMembers) {
+                    if (it.second.ast->as<ASTMethodDecl>()->parent != ast) continue;
                     auto * funPtrType = it.second.type->as<Type::Alias>();
                     auto * functionType = funPtrType->base()->getCore<Type::Function>();
                     printKeyword(Symbol::KwTypedef);

@@ -169,7 +169,7 @@ namespace tinycpp {
         // registers function type
         auto * t = types_.getOrCreateFunctionType(std::move(ftype));
         ast->setType(t);
-        auto methodName = ast->name.name();
+        auto methodName = ast->name;
         // registers self as member of the class
         if (ast->isVirtual()) {
             if (!classType->hasOwnVirtualTable()) {
@@ -177,7 +177,7 @@ namespace tinycpp {
                 classType->setVirtualTable(types_.getOrCreateVTable(vtableName));
             }
             auto * vtable = classType->getVirtualTable();
-            auto vtableMemberName = Symbol{STR("__tinycpp__" << classType->toString() << "__vtable__" << methodName)};
+            auto vtableMemberName = Symbol{STR("__tinycpp__" << classType->toString() << "__vtable__" << methodName.name())};
             auto * vtableMemberType = types_.createTypeAlias(vtableMemberName, types_.getOrCreatePointerType(t));
             if (ast->isOverride()) {
                 vtable->overrideMember(methodName, vtableMemberType, ast);
@@ -186,10 +186,6 @@ namespace tinycpp {
             }
         }
         if (ast->body) {
-            // if (classType->getMemberType(methodName) == nullptr) {
-            // } else {
-            //     classType->overrideMember(methodName, t, ast);
-            // }
             classType->registerMember(methodName, t, ast);
             // enters the context and add all arguments as local variables
             names_.enterFunctionScope(t->returnType());
