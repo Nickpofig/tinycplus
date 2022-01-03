@@ -20,6 +20,7 @@ namespace tinycpp {
         std::unordered_map<Symbol, int> definitions;
     private: // temporary data
         int inheritanceDepth = 0;
+        bool programEntryWasDefined_ = false;
     public:
         Transpiler(NamesContext & names, TypesContext & types, std::ostream & output, bool isColorful)
             :names_{names}
@@ -27,6 +28,12 @@ namespace tinycpp {
             ,printer_{output}
             ,isPrintColorful_{isColorful}
         { }
+    public:
+        void validateSelf() {
+            if (!programEntryWasDefined_ && symbols::Entry != symbols::NoEntry) {
+                throw std::runtime_error(STR("Entry function " << symbols::Entry << " was not defined!"));
+            }
+        }
     private:
         void registerDeclaration(Symbol realName, Symbol name, int definitionsLimit = 0) {
             auto result = definitions.find(realName);
@@ -62,9 +69,10 @@ namespace tinycpp {
             if (isPrintColorful_) printer_ << printer_.numberLiteral;
             printer_ << value;
         }
-        void printComment(std::string const & text) {
+        void printComment(std::string const & text, bool newline = true) {
             if (isPrintColorful_) printer_ << printer_.comment;
             printer_ << "// " << text;
+            if (newline) printer_.newline();
         }
         void printVTableInitFunctionDeclaration(Type::Class * classType) {
             auto vtableType = classType->getVirtualTable();
@@ -137,12 +145,14 @@ namespace tinycpp {
                 printSymbol(Symbol::Semicolon);
                 printer_.newline();
                 // ** class instance vtable assignment
+                bool vtableRequiresInit = symbols::Entry == symbols::NoEntry;
                 if (auto * classType = complexType->as<Type::Class>()) {
                     auto * vtable = classType->getVirtualTable();
-                    if (vtable) {
+                    if (vtableRequiresInit && vtable) {
                         printIdentifier(vtable->getGlobalInitFunctionName());
                         printSymbol(Symbol::ParOpen);
                         printSymbol(Symbol::ParClose);
+                        printSymbol(Symbol::Semicolon);
                         printer_.newline();
                     }
                     printIdentifier(symbols::KwThis);

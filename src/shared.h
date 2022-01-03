@@ -25,6 +25,8 @@ namespace tinycpp {
         static Symbol KwThis {"this"}; // compulsory first argument of any method, representing reference to the target.
         static Symbol KwBase {"base"}; // cast of "this" to the base type of the current class.
         static Symbol VTable {"__tinycpp__vtable"}; // name for class field with vtable pointer type.
+        static Symbol NoEntry{"__tinycpp__program__entry__"};
+        extern Symbol Entry;
 
         bool static isParsebleKeyword(Symbol const & s) {
             return s == KwClass || s == KwVirtual || s == KwOverride;

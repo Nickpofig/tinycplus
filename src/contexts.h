@@ -136,6 +136,14 @@ namespace tinycpp {
                 i = types_.insert(std::make_pair(typeName, std::unique_ptr<Type>(new Type::Pointer{base}))).first;
             return i->second.get();
         }
+
+        void findEachVirtualTable(std::vector<Type::VTable*> & result) {
+            for (auto & type : types_) {
+                if (auto vtable = type.second->as<Type::VTable>()) {
+                    result.push_back(vtable);
+                }
+            }
+        }
     }; // tinycpp::TypesContext
 
 

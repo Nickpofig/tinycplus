@@ -18,13 +18,6 @@ namespace tinycpp {
             return result;
         }
 
-        static std::unique_ptr<AST> Parse(std::string const & code, std::string const & filename) {
-            Parser p{Lexer::Tokenize(code, filename)};
-            std::unique_ptr<AST> result{p.REPL()};
-            p.pop(Token::Kind::EoF);
-            return result;
-        }
-
     protected:
 
         Parser(std::vector<Token> && tokens): ParserBase{std::move(tokens)} { }

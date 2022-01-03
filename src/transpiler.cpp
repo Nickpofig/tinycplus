@@ -82,6 +82,28 @@ namespace tinycpp {
         if (ast->parent) { // ..when not the root context
             printSymbol(Symbol::CurlyOpen);
             printer_.indent();
+            if (auto * function = ast->parent->as<ASTFunDecl>();
+                function != nullptr // is a function
+                && function->as<ASTMethodDecl>() == nullptr // but not a method
+                && function->name == symbols::Entry // and it is the program entry
+                && symbols::Entry != symbols::NoEntry // ...just in case
+            ) {
+                // Program Entry must be fully declared only after all class declarations and never earlier.
+                // Otherwise resulted TinyC code won't compile.
+                programEntryWasDefined_ = true;
+                printer_.newline();
+                std::vector<Type::VTable*> vtables;
+                types_.findEachVirtualTable(vtables);
+                printComment(" === Initializing virtual tables === ");
+                for (auto * vtable : vtables) {
+                    printIdentifier(vtable->getGlobalInitFunctionName());
+                    printSymbol(Symbol::ParOpen);
+                    printSymbol(Symbol::ParClose);
+                    printSymbol(Symbol::Semicolon);
+                    printer_.newline();
+                }
+                printComment(" === Running the rest of the program === ");
+            }
         }
         for (auto & i : ast->body) {
             printer_.newline();
