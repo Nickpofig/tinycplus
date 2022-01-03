@@ -40,9 +40,8 @@ namespace tinycpp {
             }
         }
         void validatedName(Symbol const & name) {
-            auto foundFrom = name.name().find("__tinycpp__");
-            if (foundFrom == 0) {
-                throw std::runtime_error{STR("Name can't start with \"__tinycpp__\" prefix!")};
+            if (symbols::isReservedName(name)) {
+                throw std::runtime_error{STR("Name " << name << " contains or is a reserved TinyC+ name!")};
             }
         }
         inline void print(Symbol const & symbol, tiny::color color) {

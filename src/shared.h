@@ -29,6 +29,16 @@ namespace tinycpp {
         bool static isParsebleKeyword(Symbol const & s) {
             return s == KwClass || s == KwVirtual || s == KwOverride;
         }
+
+        bool static isReservedName(Symbol const & s) {
+            auto tinycppIndex = s.name().find("__tinycpp__");
+            if (tinycppIndex == 0) {
+                return true;
+            }
+            if (isParsebleKeyword(s)) return true;
+            if (s == KwThis || s == KwBase) return true;
+            return false;
+        }
     } // namespace symbols
 
 } // namespace tinycpp
