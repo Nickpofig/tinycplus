@@ -9,7 +9,7 @@
 #include "types.h"
 #include "contexts.h"
 
-namespace tinycpp {
+namespace tinycplus {
 
     class TypeChecker : public ASTVisitor {
     private: // data

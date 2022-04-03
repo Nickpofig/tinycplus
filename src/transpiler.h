@@ -9,7 +9,7 @@
 #include "types.h"
 #include "contexts.h"
 
-namespace tinycpp {
+namespace tinycplus {
 
     class Transpiler : public ASTVisitor {
     private: // persistant data
@@ -17,10 +17,12 @@ namespace tinycpp {
         TypesContext & types_;
         ASTPrettyPrinter printer_;
         bool isPrintColorful_ = false;
-        std::unordered_map<Symbol, int> definitions;
+        std::unordered_map<Symbol, int> definitions_;
+        std::vector<AST*> current_ast_hierarchy_;
     private: // temporary data
-        int inheritanceDepth = 0;
         bool programEntryWasDefined_ = false;
+        std::vector<Type::VTable*> bufferVtableTypes_;
+        std::vector<FieldInfo> bufferFields_;
     public:
         Transpiler(NamesContext & names, TypesContext & types, std::ostream & output, bool isColorful)
             :names_{names}
@@ -35,18 +37,32 @@ namespace tinycpp {
             }
         }
     private:
+        void pushAst(AST * ast) {
+            current_ast_hierarchy_.push_back(ast);
+        }
+        // Used only with [pushAst] as a self-cleaning process
+        void popAst() {
+            current_ast_hierarchy_.pop_back();
+        }
+        bool isRootLevel() {
+            return current_ast_hierarchy_.size() == 0;
+        }
+        AST * peekAst() {
+            assert(!isRootLevel());
+            return current_ast_hierarchy_.back();
+        }
         void registerDeclaration(Symbol realName, Symbol name, int definitionsLimit = 0) {
-            auto result = definitions.find(realName);
-            if (result == definitions.end()) {
-                definitions.insert(std::make_pair(realName, definitionsLimit));
+            auto result = definitions_.find(realName);
+            if (result == definitions_.end()) {
+                definitions_.insert(std::make_pair(realName, definitionsLimit));
             } else {
-                auto & limit = definitions.at(realName);
+                auto & limit = definitions_.at(realName);
                 if (--limit < 0) {
                     throw std::runtime_error{STR("Multiple redefinitions of " << name)};
                 }
             }
         }
-        void validatedName(Symbol const & name) {
+        void validateName(Symbol const & name) {
             if (symbols::isReservedName(name)) {
                 throw std::runtime_error{STR("Name " << name << " contains or is a reserved TinyC+ name!")};
             }
@@ -74,12 +90,90 @@ namespace tinycpp {
             printer_ << "// " << text;
             if (newline) printer_.newline();
         }
+        void printStructHeader(Type::Complex * type) {
+            printKeyword(Symbol::KwStruct);
+            printSpace();
+            printIdentifier(type->toString());
+            printSpace();
+        }
+        void printScopeOpen() {
+            printSymbol(Symbol::CurlyOpen);
+            printer_.indent();
+        }
+        void printScopeClose(bool isSemicolonTerminated) {
+            printer_.dedent();
+            printer_.newline();
+            printSymbol(Symbol::CurlyClose);
+            if (isSemicolonTerminated) {
+                printSymbol(Symbol::Semicolon);
+            }
+            printer_.newline();
+        }
+        void printFields(std::vector<FieldInfo> & fields) {
+            for (auto & field : fields) {
+                printer_.newline();
+                printType(field.type);
+                printSpace();
+                printIdentifier(field.name);
+                printSymbol(Symbol::Semicolon);
+            }
+        }
+        void printFunctionPointerTypeDeclaration(Type::Alias * type) {
+            auto * functionType = type->base()->getCore<Type::Function>();
+            assert(functionType != nullptr && "oh no, it is not a function pointer type alias");
+            // * declaration starts
+            printKeyword(Symbol::KwTypedef);
+            printSpace();
+            printType(functionType->returnType());
+            // * name as pointer
+            printSpace();
+            printSymbol(Symbol::ParOpen);
+            printSymbol(Symbol::Mul);
+            printType(type);
+            printSymbol(Symbol::ParClose);
+            // * arguments
+            printSymbol(Symbol::ParOpen);
+            for (auto i = 0; i < functionType->numArgs(); i++) {
+                if (i > 0) {
+                    printSymbol(Symbol::Comma);
+                    printSpace();
+                }
+                printType(functionType->argType(i));
+            }
+            printSymbol(Symbol::ParClose);
+            // * declaration ends
+            printSymbol(Symbol::Semicolon);
+            printer_.newline();
+        }
+        void printVTableDeclaration(Type::Class * classType) {
+            if (classType->isAbstract()) {
+                return;
+            }
+            std::vector<FieldInfo> vtableFields;
+            auto * vtableType = classType->getVirtualTable();
+            vtableType->collectFieldsOrdered(vtableFields);
+            // * vtable struct declaration
+            printStructHeader(vtableType);
+            printScopeOpen();
+            // ** prints function pointers for each virtual method with respect to class precedence order
+            printFields(vtableFields);
+            printScopeClose(true);
+            printer_.newline();
+            // * global instance declaration
+            printType(vtableType);
+            printSpace();
+            printIdentifier(vtableType->getGlobalInstanceName());
+            printSymbol(Symbol::Semicolon);
+            printer_.newline();
+            printer_.newline();
+        }
         void printVTableInitFunctionDeclaration(Type::Class * classType) {
             auto vtableType = classType->getVirtualTable();
             if (vtableType == nullptr) return;
             auto returnType = types_.getTypeVoid();
             auto functionName = vtableType->getGlobalInitFunctionName();
             if (!names_.addGlobalVariable(functionName, returnType)) return;
+            auto vtableGlobalInstanceName = vtableType->getGlobalInstanceName();
             // * return type
             printType(returnType);
             printSpace();
@@ -92,26 +186,22 @@ namespace tinycpp {
             // * body start
             printSymbol(Symbol::CurlyOpen);
             printer_.indent();
-            printer_.newline();
             {
-                std::vector<std::pair<Symbol, Type::Complex::Member>>  vtableMembers;
-                vtableType->collectMembersOrdered(vtableMembers);
-                int remained = vtableMembers.size();
-                for (auto & member : vtableMembers) {
+                std::vector<FieldInfo> vtableFields;
+                vtableType->collectFieldsOrdered(vtableFields);
+                for (auto & field : vtableFields) {
                     // e.g ~~> this.vtable->functionPtr = function;
-                    printIdentifier(vtableType->getGlobalInstanceName());
+                    printer_.newline();
+                    printIdentifier(vtableGlobalInstanceName);
                     printSymbol(Symbol::Dot);
-                    printIdentifier(member.first);
+                    printIdentifier(field.name);
                     printSpace();
                     printSymbol(Symbol::Assign);
                     printSpace();
-                    auto methodInfo = classType->getMethodInfo(member.first);
+                    auto methodInfo = classType->getMethodInfo(field.name).value();
                     printSymbol(Symbol::BitAnd);
                     printIdentifier(methodInfo.fullName);
                     printSymbol(Symbol::Semicolon);
-                    if(--remained > 0) {
-                        printer_.newline();
-                    }
                 }
             }
             // * body end
@@ -177,18 +267,18 @@ namespace tinycpp {
                     printSymbol(Symbol::Semicolon);
                     printer_.newline();
                 }
-                // ** class instance field construction
-                std::vector<std::pair<Symbol, Type::Complex::Member>> fields;
-                complexType->collectMembersOrdered(fields);
+                // ** class instance field construction (all fields)
+                std::vector<FieldInfo> fields;
+                complexType->collectFieldsOrdered(fields);
                 for (auto & field : fields) {
-                    auto memberType = field.second.type;
+                    auto memberType = field.type;
                     if (memberType->isPointer()) continue;
                     auto * fieldComplexType = memberType->as<Type::Complex>();
                     if (fieldComplexType == nullptr) continue;
                     // e.g ~~> this.field = fieldClassConstructor();
                     printIdentifier(symbols::KwThis);
                     printSymbol(Symbol::Dot);
-                    printIdentifier(field.first);
+                    printIdentifier(field.name);
                     printSpace();
                     printSymbol(Symbol::Assign);
                     printSpace();
@@ -249,4 +339,4 @@ namespace tinycpp {
         void visit(ASTCast * ast) override;
     }; // class Transpiler
 
-}; // namespace tinycpp
+}; // namespace tinycplus

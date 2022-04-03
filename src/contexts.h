@@ -8,7 +8,7 @@
 #include "shared.h"
 #include "types.h"
 
-namespace tinycpp {
+namespace tinycplus {
 
     /** An information about TinyC+ program types.
      */
@@ -96,18 +96,20 @@ namespace tinycpp {
         }
     public: // mutators
         Type::Struct * getOrCreateStructType(Symbol name) {
-            auto maker = [] () { return new Type::Struct{nullptr}; };
+            auto maker = [] () { return new Type::Struct{}; };
             return getOrCreateNonAliasType<Type::Struct>(name, maker);
         }
 
         Type::Class * getOrCreateClassType(Symbol name) {
-            auto maker = [] () { return new Type::Class{nullptr}; };
+            auto maker = [name] () {
+                auto vtableName = symbols::startLanguageName()
+                    .add(name)
+                    .add("_vtable")
+                    .end();
+                auto * vtable = new Type::VTable{vtableName};
+                return new Type::Class{vtable};
+            };
             return getOrCreateNonAliasType<Type::Class>(name, maker);
-        }
-
-        Type::VTable * getOrCreateVTable(Symbol name) {
-            auto maker = [name] () { return new Type::VTable{name}; };
-            return getOrCreateNonAliasType<Type::VTable>(name, maker);
         }
 
         Type::Function * getOrCreateFunctionType(std::unique_ptr<Type::Function> type) {
@@ -144,7 +146,23 @@ namespace tinycpp {
                 }
             }
         }
-    }; // tinycpp::TypesContext
+
+        void addMethodToClass(ASTMethodDecl * methodAst, Type::Class * classType) {
+            auto methodName = methodAst->name;
+            auto * functionType = methodAst->getType()->as<Type::Function>();
+            classType->registerMethod(methodName, functionType, methodAst);
+            if (methodAst->isVirtualized()) {
+                auto * vtable = classType->getVirtualTable();
+                auto functionPointerName = symbols::startLanguageName()
+                    .add(classType->toString())
+                    .add("__vtable__")
+                    .add(methodName)
+                    .end();
+                auto * vtableMemberType = createTypeAlias(functionPointerName, getOrCreatePointerType(functionType));
+                vtable->registerField(methodName, vtableMemberType, methodAst);
+            }
+        }
+    }; // tinycplus::TypesContext
 
 
     /** An information about TinyC+ program names.
@@ -251,6 +269,6 @@ namespace tinycpp {
             global_.print(printer);
             printer.newline();
         }
-    }; // tinycpp::NamesContext
+    }; // tinycplus::NamesContext
 
-}; // namespace tinycpp
+}; // namespace tinycplus

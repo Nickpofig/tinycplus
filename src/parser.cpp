@@ -1,6 +1,6 @@
 #include "parser.h"
 
-namespace tinycpp {
+namespace tinycplus {
 
     bool Parser::isTypeName(Symbol name) const {
         if (possibleTypes_.find(name) != possibleTypes_.end())
@@ -63,13 +63,14 @@ namespace tinycpp {
     /*
         FUN_ARG := TYPE identifier
         FUN_HEAD := TYPE_FUN_RET identifier '(' [ FUN_ARG { ',' FUN_ARG } ] ')'
-        FUN_DECL := FUN_HEAD [ BLOCK_STMT ]
-        METHOD_DECL := FUN_HEAD [ 'virtual' | 'override' ] [ BLOCK_STMT ]
+        FUN_DECL := FUN_HEAD [ BLOCK_STMT | ';' ]
+        METHOD_DECL := FUN_HEAD [ [ 'virtual' | 'override' ] [ BLOCK_STMT | ';' ] | 'abstract' ';' ]
     */
     std::unique_ptr<AST> Parser::FUN_DECL(bool isMethod) {
         std::unique_ptr<ASTType> type{TYPE_FUN_RET()};
-        if (!isIdentifier(top()))
+        if (!isIdentifier(top())) {
             throw ParserError(STR("Expected identifier, but " << top() << " found"), top().location(), eof());
+        }
         auto name = pop();
         auto * method = isMethod ? new ASTMethodDecl{name, std::move(type)} : nullptr;
         std::unique_ptr<ASTFunDecl> result{
@@ -91,18 +92,24 @@ namespace tinycpp {
         }
         pop(Symbol::ParClose);
         // define method virtuality
+        bool isAbstract_ = false;
         if (isMethod) {
             if (condPop(symbols::KwVirtual)) {
-                method->virtuality = ASTMethodDecl::Virtuality::Base;
+                method->virtuality = ASTMethodDecl::Virtuality::Virtual;
             } else if (condPop(symbols::KwOverride)) {
                 method->virtuality = ASTMethodDecl::Virtuality::Override;
+            } else if (condPop(symbols::KwAbstract)) {
+                method->virtuality = ASTMethodDecl::Virtuality::Abstract;
             }
         }
         // if there is body, parse it, otherwise leave empty as it is just a declaration
         if (top() == Symbol::CurlyOpen) {
+            if (isAbstract_) {
+                throw ParserError(STR("Abstract method can't have a body"), top().location(), false);
+            }
             result->body = BLOCK_STMT();
-        } else {
-            assert(condPop(Symbol::Semicolon));
+        } else if (!condPop(Symbol::Semicolon)) {
+            throw ParserError(STR("Expected semicolon after method forward declartion"), top().location(), false);
         }
         return result;
     }
@@ -364,6 +371,7 @@ namespace tinycpp {
         // Parses body
         if (condPop(Symbol::CurlyOpen)) {
             classDecl->isDefinition = true;
+            std::unordered_set<ASTMethodDecl*> undefinedMethods {};
             while (! condPop(Symbol::CurlyClose)) {
                 // parsing field and method
                 auto member = FUN_OR_VAR_DECL(true);
@@ -371,8 +379,15 @@ namespace tinycpp {
                     classDecl->fields.push_back(std::unique_ptr<ASTVarDecl>(field));
                 } else if (auto * method = member->as<ASTMethodDecl>()) { // saving as method
                     classDecl->methods.push_back(std::unique_ptr<ASTMethodDecl>(method));
+                    if (!method->body && !method->isAbstract()) {
+                        undefinedMethods.insert(method);
+                    }
                 }
                 member.release();
+            }
+            if (!undefinedMethods.empty()) {
+                auto * ast = *undefinedMethods.begin();
+                throw ParserError{STR("Method: " << ast->name.name() << " was declared but its body was not defined"), ast->location(), false};
             }
         }
         pop(Symbol::Semicolon);

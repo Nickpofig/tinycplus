@@ -6,7 +6,7 @@
 #include "transpiler.h"
 #include "types.h"
 
-namespace tinycpp {
+namespace tinycplus {
 
     void Transpiler::visit(AST * ast) {
          visitChild(ast);
@@ -32,7 +32,7 @@ namespace tinycpp {
 
     void Transpiler::visit(ASTIdentifier * ast) {
         if (ast->name == symbols::KwBase) {
-            // downcasts because method belonfs to base class
+            // downcasts because method belongs to base class
             printKeyword(Symbol::KwCast);
             printSymbol(Symbol::Lt);
             printType(ast->getType()->getCore<Type::Class>()->toString());
@@ -51,22 +51,29 @@ namespace tinycpp {
     }
 
     void Transpiler::visit(ASTPointerType * ast) {
+        pushAst(ast);
         visitChild(ast->base.get());
         printSymbol(Symbol::Mul);
+        popAst();
     }
 
     void Transpiler::visit(ASTArrayType * ast) {
+        pushAst(ast);
         visitChild(ast->base.get());
         printSymbol(Symbol::SquareOpen);
         visitChild(ast->size.get());
         printSymbol(Symbol::SquareClose);
+        popAst();
     }
 
     void Transpiler::visit(ASTNamedType * ast) {
+        pushAst(ast);
         printType(ast->name.name());
+        popAst();
     }
 
     void Transpiler::visit(ASTSequence * ast) {
+        pushAst(ast);
         auto i = ast->body.begin();
         if (i != ast->body.end()) {
             visitChild(i[0].get()); // visits sequence element
@@ -76,13 +83,17 @@ namespace tinycpp {
                 visitChild(i[0].get()); // visits sequence element
             }
         }
+        popAst();
     }
 
     void Transpiler::visit(ASTBlock * ast) {
-        if (ast->parent) { // ..when not the root context
+        bool isIndented = !isRootLevel();
+        pushAst(ast);
+        /// TODO: refactor code -> root is a special case that happens once - no need to check for it for all blocks
+        if (isIndented) { // ..when not the root context
             printSymbol(Symbol::CurlyOpen);
             printer_.indent();
-            if (auto * function = ast->parent->as<ASTFunDecl>();
+            if (auto * function = peekAst()->as<ASTFunDecl>();
                 function != nullptr // is a function
                 && function->as<ASTMethodDecl>() == nullptr // but not a method
                 && function->name == symbols::Entry // and it is the program entry
@@ -108,7 +119,8 @@ namespace tinycpp {
         for (auto & i : ast->body) {
             printer_.newline();
             visitChild(i.get());
-            if (ast->parent != nullptr
+            /// TODO: check semicolon is set correctly when necessary
+            if (isIndented
                 && !i->as<ASTFunDecl>()
                 && !i->as<ASTBlock>()
                 && !i->as<ASTIf>()
@@ -119,16 +131,18 @@ namespace tinycpp {
                 printSymbol(Symbol::Semicolon);
             }
         }
-        if (ast->parent) { // ..when not the root context
+        if (isIndented) { // ..when not the root context
             printer_.dedent();
             printer_.newline();
             printSymbol(Symbol::CurlyClose);
         }
         printer_.newline();
+        popAst();
     }
 
     void Transpiler::visit(ASTVarDecl * ast) {
-        validatedName(ast->name->name);
+        pushAst(ast);
+        validateName(ast->name->name);
         if (auto arrayType = ast->type->as<ASTArrayType>()) {
             // base type part
             visitChild(arrayType->base.get());
@@ -155,7 +169,7 @@ namespace tinycpp {
         } else if (auto * complexType = ast->getType()->as<Type::Complex>();
             complexType != nullptr
             && complexType->requiresImplicitConstruction()
-            && ast->parent->as<ASTSequence>()
+            && peekAst()->as<ASTSequence>()
         ) {
             printSpace();
             printSymbol(Symbol::Assign);
@@ -164,10 +178,12 @@ namespace tinycpp {
             printSymbol(Symbol::ParOpen);
             printSymbol(Symbol::ParClose);
         }
+        popAst();
     }
 
     void Transpiler::visit(ASTFunDecl * ast) {
-        validatedName(ast->name);
+        pushAst(ast);
+        validateName(ast->name);
         // * function return type
         visitChild(ast->typeDecl.get());
         printSpace();
@@ -193,10 +209,12 @@ namespace tinycpp {
         } else {
             printSymbol(Symbol::Semicolon);
         }
+        popAst();
     }
 
     void Transpiler::visit(ASTStructDecl * ast) {
-        validatedName(ast->name);
+        pushAst(ast);
+        validateName(ast->name);
         printKeyword(Symbol::KwStruct);
         printSpace();
         printIdentifier(ast->name.name());
@@ -215,144 +233,83 @@ namespace tinycpp {
         }
         printer_.newline();
         printComplexTypeConstructorDeclaration(ast->getType()->as<Type::Complex>());
+        popAst();
     }
 
     void Transpiler::visit(ASTClassDecl * ast) {
-        validatedName(ast->name);
-        bool isProcessingSelf = inheritanceDepth == 0;
-        auto * classType = dynamic_cast<Type::Class*>(ast->getType());
+        pushAst(ast);
+        validateName(ast->name);
+        auto * classType = ast->getType()->as<Type::Class>();
         auto * vtableType = classType->getVirtualTable();
-        std::vector<std::pair<Symbol, Type::Complex::Member>> vtableMembers;
-        if (isProcessingSelf) {
-            printer_.newline();
-            printComment(STR(" === class " << ast->name.name() << " ==="));
-            printer_.newline();
-            // * virtual table declaration and definition
-            if (vtableType != nullptr && classType->hasOwnVirtualTable() && classType->isFullyDefined()) {
-                vtableType->collectMembersOrdered(vtableMembers);
-                // ** function pointer types
-                for (auto & it : vtableMembers) {
-                    if (it.second.ast->as<ASTMethodDecl>()->parent != ast) continue;
-                    auto * funPtrType = it.second.type->as<Type::Alias>();
-                    auto * functionType = funPtrType->base()->getCore<Type::Function>();
-                    printKeyword(Symbol::KwTypedef);
-                    // *** return type declaration
-                    printSpace();
-                    printType(functionType->returnType());
-                    // *** name as pointer
-                    printSpace();
-                    printSymbol(Symbol::ParOpen);
-                    printSymbol(Symbol::Mul);
-                    printType(funPtrType);
-                    printSymbol(Symbol::ParClose);
-                    // *** arguments
-                    printSymbol(Symbol::ParOpen);
-                    for (auto i = 0; i < functionType->numArgs(); i++) {
-                        if (i > 0) {
-                            printSymbol(Symbol::Comma);
-                            printSpace();
-                        }
-                        printType(functionType->argType(i));
-                    }
-                    printSymbol(Symbol::ParClose);
-                    printSymbol(Symbol::Semicolon);
-                    printer_.newline();
-                }
-                printer_.newline();
-                // ** vtable struct
-                printKeyword(Symbol::KwStruct);
-                printSpace();
-                // *** struct name
-                printIdentifier(vtableType->toString());
-                printSpace();
-                // *** function pointers
-                printSymbol(Symbol::CurlyOpen);
-                printer_.indent();
-                printer_.newline();
-                auto remained = vtableMembers.size();
-                for (auto & member : vtableMembers) {
-                    printType(member.second.type);
-                    printSpace();
-                    printIdentifier(member.first);
-                    printSymbol(Symbol::Semicolon);
-                    if (--remained > 0) {
-                        printer_.newline();
-                    }
-                }
-                printer_.dedent();
-                printer_.newline();
-                printSymbol(Symbol::CurlyClose);
-                printSymbol(Symbol::Semicolon);
-                printer_.newline();
-                printer_.newline();
-                printType(vtableType);
-                printSpace();
-                printIdentifier(vtableType->getGlobalInstanceName());
-                printSymbol(Symbol::Semicolon);
-                printer_.newline();
-                printer_.newline();
+        printer_.newline();
+        printComment(STR(" === class " << ast->name.name() << " ==="));
+        printer_.newline();
+        printer_.newline();
+        // * virtual table declaration and definition
+        if (classType->isFullyDefined()) {
+            std::vector<FieldInfo> vtableFields;
+            vtableType->collectFieldsOrdered(vtableFields);
+            for (auto & it : vtableFields) {
+                printFunctionPointerTypeDeclaration(it.type->as<Type::Alias>());
             }
-            // * class declarartion
-            printKeyword(Symbol::KwStruct);
-            printSpace();
-            printIdentifier(ast->name.name());
+            printVTableDeclaration(classType);
         }
+        // * class declarartion
+        printKeyword(Symbol::KwStruct);
+        printSpace();
+        printIdentifier(ast->name.name());
         if (ast->isDefinition) {
-            // * class fields
-            if (isProcessingSelf) {
-                printSymbol(Symbol::CurlyOpen);
-                printer_.indent();
-                // ** pointer to vtable
+            // ** class declaration opened
+            printSymbol(Symbol::CurlyOpen);
+            printer_.indent();
+            // ** vtable pointer declaration
+            printer_.newline();
+            printType(classType->isAbstract() ? types_.getTypeVoid() : vtableType);
+            printSymbol(Symbol::Mul);
+            printSpace();
+            printIdentifier(symbols::VTable);
+            printSymbol(Symbol::Semicolon);
+            // ** class fields declaration
+            std::vector<FieldInfo> classFields;
+            classType->collectFieldsOrdered(classFields);
+            for (auto & i : classFields) {
                 printer_.newline();
-                printType(vtableType != nullptr ? vtableType : types_.getTypeVoid());
-                printSymbol(Symbol::Mul);
-                printSpace();
-                printIdentifier(symbols::VTable);
+                visitChild(i.ast);
                 printSymbol(Symbol::Semicolon);
             }
-            // ** base class fields
-            if (ast->baseClass) {
-                inheritanceDepth++; 
-                auto * baseClassType = dynamic_cast<Type::Class *>(ast->baseClass->getType());
-                visit(baseClassType->ast());
-                inheritanceDepth--;
-            }
-            // ** this class fields
-            for (auto & i : ast->fields) {
+            // ** class declaration closed
+            printer_.dedent();
+            printer_.newline();
+            printSymbol(Symbol::CurlyClose);
+            printSymbol(Symbol::Semicolon);
+            printer_.newline();
+            // ** methods declaration
+            for (auto & i : ast->methods) {
+                if (i->isAbstract()) continue;
                 printer_.newline();
                 visitChild(i.get());
-                printSymbol(Symbol::Semicolon);
             }
-            // ** this class methods
-            if (isProcessingSelf) {
-                printer_.dedent();
-                printer_.newline();
-                printSymbol(Symbol::CurlyClose);
-                printSymbol(Symbol::Semicolon);
-                printer_.newline();
-                // *** function declaration
-                for (auto & i : ast->methods) {
-                    printer_.newline();
-                    visitChild(i.get());
-                }
-                printer_.newline();
+            printer_.newline();
+            if (!classType->isAbstract()) {
                 printVTableInitFunctionDeclaration(classType);
                 printComplexTypeConstructorDeclaration(classType);
             }
         }
+        popAst();
     }
 
 
     void Transpiler::visit(ASTMethodDecl * ast) {
-        validatedName(ast->name);
-        auto * classParent = ast->findParent<ASTClassDecl>();
+        auto * classParent = peekAst()->as<ASTClassDecl>();
         assert(classParent && "must have an ast class decl as parent ast");
+        pushAst(ast);
+        validateName(ast->name);
         // * method return type
         visitChild(ast->typeDecl.get());
         printSpace();
         // * method name
         auto classType = classParent->getType()->as<Type::Class>();
-        auto info = classType->getMethodInfo(ast->name);
+        auto info = classType->getMethodInfo(ast->name).value();
         registerDeclaration(info.fullName, ast->name, 1);
         printIdentifier(info.fullName);
         // * method arguments
@@ -383,116 +340,141 @@ namespace tinycpp {
         } else {
             printSymbol(Symbol::Semicolon);
         }
+        popAst();
     }
 
     void Transpiler::visit(ASTFunPtrDecl * ast) {
-        validatedName(ast->name->name);
-        printKeyword(Symbol::KwTypedef);
-        // return type
-        printSpace();
-        visitChild(ast->returnType.get());
-        printSpace();
-        // name as pointer
-        printSymbol(Symbol::ParOpen);
-        printSymbol(Symbol::Mul);
-        visitChild(ast->name.get());
-        printSymbol(Symbol::ParClose);
-        // arguments
-        printSymbol(Symbol::ParOpen);
-        auto i = ast->args.begin();
-        if (i != ast->args.end()) {
-            visitChild(i[0].get());
-            while (++i != ast->args.end()) {
-                printSymbol(Symbol::Comma);
-                printSpace();
+        pushAst(ast);
+        {
+            validateName(ast->name->name);
+            printKeyword(Symbol::KwTypedef);
+            // return type
+            printSpace();
+            visitChild(ast->returnType.get());
+            printSpace();
+            // name as pointer
+            printSymbol(Symbol::ParOpen);
+            printSymbol(Symbol::Mul);
+            visitChild(ast->name.get());
+            printSymbol(Symbol::ParClose);
+            // arguments
+            printSymbol(Symbol::ParOpen);
+            auto i = ast->args.begin();
+            if (i != ast->args.end()) {
                 visitChild(i[0].get());
+                while (++i != ast->args.end()) {
+                    printSymbol(Symbol::Comma);
+                    printSpace();
+                    visitChild(i[0].get());
+                }
             }
+            printSymbol(Symbol::ParClose);
+            printSymbol(Symbol::Semicolon);
         }
-        printSymbol(Symbol::ParClose);
-        printSymbol(Symbol::Semicolon);
+        popAst();
     }
 
     void Transpiler::visit(ASTIf * ast) {
-        // keyword
-        printKeyword(Symbol::KwIf);
-        printSpace();
-        // condition
-        printSymbol(Symbol::ParOpen);
-        visitChild(ast->cond.get());
-        printSymbol(Symbol::ParClose);
-        // true case body
-        visitChild(ast->trueCase.get());
-        // false case body
-        if (ast->falseCase.get() != nullptr) {
-            printKeyword(Symbol::KwElse);
-            visitChild(ast->falseCase.get());
+        pushAst(ast);
+        {
+            // keyword
+            printKeyword(Symbol::KwIf);
+            printSpace();
+            // condition
+            printSymbol(Symbol::ParOpen);
+            visitChild(ast->cond.get());
+            printSymbol(Symbol::ParClose);
+            // true case body
+            visitChild(ast->trueCase.get());
+            // false case body
+            if (ast->falseCase.get() != nullptr) {
+                printKeyword(Symbol::KwElse);
+                visitChild(ast->falseCase.get());
+            }
         }
+        popAst();
     }
 
     void Transpiler::visit(ASTSwitch * ast) {
-        // keyword
-        printKeyword(Symbol::KwSwitch);
-        // expression/condition
-        printSpace();
-        printSymbol(Symbol::ParOpen);
-        visitChild(ast->cond.get());
-        printSymbol(Symbol::ParClose);
-        // body
-        printSpace();
-        printSymbol(Symbol::CurlyOpen);
-        printer_.indent();
-        for (auto & i : ast->cases) {
-            printer_.newline();
-            // case keyword
-            printKeyword(Symbol::KwCase);
+        pushAst(ast);
+        {
+            // keyword
+            printKeyword(Symbol::KwSwitch);
+            // expression/condition
             printSpace();
-            // case constant
-            printNumber(i.first);
-            // case body
-            printSymbol(Symbol::Colon);
-            visitChild(i.second.get());
-        }
-        if (ast->defaultCase.get() != nullptr) {
+            printSymbol(Symbol::ParOpen);
+            visitChild(ast->cond.get());
+            printSymbol(Symbol::ParClose);
+            // body
+            printSpace();
+            printSymbol(Symbol::CurlyOpen);
+            printer_.indent();
+            for (auto & i : ast->cases) {
+                printer_.newline();
+                // case keyword
+                printKeyword(Symbol::KwCase);
+                printSpace();
+                // case constant
+                printNumber(i.first);
+                // case body
+                printSymbol(Symbol::Colon);
+                visitChild(i.second.get());
+            }
+            if (ast->defaultCase.get() != nullptr) {
+                printer_.newline();
+                printKeyword(Symbol::KwDefault);
+                printSymbol(Symbol::Colon);
+                visitChild(ast->defaultCase.get());
+            }
+            printer_.dedent();
             printer_.newline();
-            printKeyword(Symbol::KwDefault);
-            printSymbol(Symbol::Colon);
-            visitChild(ast->defaultCase.get());
+            printSymbol(Symbol::CurlyClose);
         }
-        printer_.dedent();
-        printer_.newline();
-        printSymbol(Symbol::CurlyClose);
+        popAst();
     }
 
     void Transpiler::visit(ASTWhile * ast) {
-        printKeyword(Symbol::KwWhile);
-        printSpace();
-        printSymbol(Symbol::ParOpen);
-        visitChild(ast->cond.get());
-        printSymbol(Symbol::ParClose);
-        visitChild(ast->body.get());
+        pushAst(ast);
+        {
+            printKeyword(Symbol::KwWhile);
+            printSpace();
+            printSymbol(Symbol::ParOpen);
+            visitChild(ast->cond.get());
+            printSymbol(Symbol::ParClose);
+            visitChild(ast->body.get());
+        }
+        popAst();
     }
 
     void Transpiler::visit(ASTDoWhile * ast) {
-        printKeyword(Symbol::KwDo);
-        visitChild(ast->body.get());
-        printKeyword(Symbol::KwWhile);
-        printSpace();
-        printSymbol(Symbol::ParOpen);
-        visitChild(ast->cond.get());
-        printSymbol(Symbol::ParClose);
+        pushAst(ast);
+        {
+            printKeyword(Symbol::KwDo);
+            visitChild(ast->body.get());
+            printKeyword(Symbol::KwWhile);
+            printSpace();
+            printSymbol(Symbol::ParOpen);
+            visitChild(ast->cond.get());
+            printSymbol(Symbol::ParClose);
+        }
+        popAst();
     }
 
     void Transpiler::visit(ASTFor * ast) {
-        printKeyword(Symbol::KwFor);
-        printSpace();
-        printSymbol(Symbol::ParOpen);
-        visitChild(ast->init.get());
-        printSymbol(Symbol::Semicolon);
-        visitChild(ast->cond.get());
-        printSymbol(Symbol::Semicolon);
-        visitChild(ast->increment.get());
-        printSymbol(Symbol::ParClose);
-        visitChild(ast->body.get());
+        pushAst(ast);
+        {
+            printKeyword(Symbol::KwFor);
+            printSpace();
+            printSymbol(Symbol::ParOpen);
+            visitChild(ast->init.get());
+            printSymbol(Symbol::Semicolon);
+            visitChild(ast->cond.get());
+            printSymbol(Symbol::Semicolon);
+            visitChild(ast->increment.get());
+            printSymbol(Symbol::ParClose);
+            visitChild(ast->body.get());
+        }
+        popAst();
     }
 
     void Transpiler::visit(ASTBreak * ast) {
@@ -504,55 +486,86 @@ namespace tinycpp {
     }
 
     void Transpiler::visit(ASTReturn * ast) {
-        printKeyword(Symbol::KwReturn);
-        printSpace();
-        visitChild(ast->value.get());
+        pushAst(ast);
+        {
+            printKeyword(Symbol::KwReturn);
+            printSpace();
+            visitChild(ast->value.get());
+        }
+        popAst();
     }
 
     void Transpiler::visit(ASTBinaryOp * ast) {
-        visitChild(ast->left.get());
-        printSpace();
-        printSymbol(ast->op.name());
-        printSpace();
-        visitChild(ast->right.get());
+        pushAst(ast);
+        {
+            visitChild(ast->left.get());
+            printSpace();
+            printSymbol(ast->op.name());
+            printSpace();
+            visitChild(ast->right.get());
+        }
+        popAst();
     }
 
     void Transpiler::visit(ASTAssignment * ast) {
-        visitChild(ast->lvalue.get()); 
-        printSpace();
-        printSymbol(ast->op.name());
-        printSpace();
-        visitChild(ast->value.get());
+        pushAst(ast);
+        {
+            visitChild(ast->lvalue.get()); 
+            printSpace();
+            printSymbol(ast->op.name());
+            printSpace();
+            visitChild(ast->value.get());
+        }
+        popAst();
     }
 
     void Transpiler::visit(ASTUnaryOp * ast) {
-        printSymbol(ast->op.name());
-        visitChild(ast->arg.get());
+        pushAst(ast);
+        {
+            printSymbol(ast->op.name());
+            visitChild(ast->arg.get());
+        }
+        popAst();
     }
 
     void Transpiler::visit(ASTUnaryPostOp * ast) {
-        visitChild(ast->arg.get());
-        printSymbol(ast->op.name());
+        pushAst(ast);
+        {
+            visitChild(ast->arg.get());
+            printSymbol(ast->op.name());
+        }
+        popAst();
     }
 
     void Transpiler::visit(ASTAddress * ast) {
-        printSymbol(Symbol::BitAnd);
-        visitChild(ast->target.get());
+        pushAst(ast);
+        {
+            printSymbol(Symbol::BitAnd);
+            visitChild(ast->target.get());
+        }
+        popAst();
     }
 
     void Transpiler::visit(ASTDeref * ast) {
-        printSymbol(Symbol::Mul);
-        visitChild(ast->target.get());
+        pushAst(ast);
+        {
+            printSymbol(Symbol::Mul);
+            visitChild(ast->target.get());
+        }
+        popAst();
     }
 
     void Transpiler::visit(ASTIndex * ast) {
+        pushAst(ast);
         visitChild(ast->base.get());
         printSymbol(Symbol::SquareOpen);
         visitChild(ast->index.get());
         printSymbol(Symbol::SquareClose);
+        popAst();
     }
 
     void Transpiler::visit(ASTMember * ast) {
+        pushAst(ast);
         if (ast->member->as<ASTCall>()) { // method call
             /// WARNING: function pointer is allowed only in root context,
             ///       however if it will change and data structures become allowed to use them
@@ -563,18 +576,20 @@ namespace tinycpp {
             printSymbol(ast->op);
             visitChild(ast->member.get());
         }
+        popAst();
     }
 
     void Transpiler::visit(ASTCall * ast) {
+        auto * member = peekAst()->as<ASTMember>();
+        pushAst(ast);
         auto * ident = ast->function->as<ASTIdentifier>();
-        auto * member = ast->parent->as<ASTMember>();
         if (member != nullptr && !ident->getType()->isPointer()) { // method call
             auto targetType = member->base->getType();
             auto * classType = targetType->getCore<Type::Class>();
-            auto methodInfo = classType->getMethodInfo(ident->name);
-            auto * targetClassType = methodInfo.targetClassType;
+            auto methodInfo = classType->getMethodInfo(ident->name).value();
+            auto * targetClassType = methodInfo.type->argType(0)->getCore<Type::Class>();
             auto baseAsIdent = member->base->as<ASTIdentifier>();
-            if (methodInfo.ast->isVirtual() && (baseAsIdent == nullptr || baseAsIdent->name != symbols::KwBase)) {
+            if (methodInfo.ast->isVirtualized() && (baseAsIdent == nullptr || baseAsIdent->name != symbols::KwBase)) {
                 visitChild(member->base.get());
                 printSymbol(targetType->isPointer() ? Symbol::ArrowR : Symbol::Dot);
                 printIdentifier(symbols::VTable);
@@ -589,7 +604,7 @@ namespace tinycpp {
             {
                 // * target as the first argument
                 if (classType != targetClassType) {
-                    // downcasts because method belonfs to base class
+                    // downcasts because method belongs to base class
                     printKeyword(Symbol::KwCast);
                     printSymbol(Symbol::Lt);
                     printType(targetClassType->toString());
@@ -630,9 +645,11 @@ namespace tinycpp {
             }
             printSymbol(Symbol::ParClose);
         }
+        popAst();
     }
 
     void Transpiler::visit(ASTCast * ast) {
+        pushAst(ast);
         printKeyword(Symbol::KwCast);
         printSymbol(Symbol::Lt);
         visitChild(ast->type.get());
@@ -640,6 +657,7 @@ namespace tinycpp {
         printSymbol(Symbol::ParOpen);
         visitChild(ast->value.get());
         printSymbol(Symbol::ParClose);
+        popAst();
     }
 
-} // namespace tinycpp
+} // namespace tinycplus

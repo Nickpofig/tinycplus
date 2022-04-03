@@ -9,7 +9,7 @@ A program is collection of ordered function, type, and variable declarations. Or
 
 ### Functions
 
-    FUN_DECL := FUN_HEAD [ BLOCK_STMT ]
+    FUN_DECL := FUN_HEAD [ BLOCK_STMT | ';' ]
     FUN_HEAD := TYPE_FUN_RET identifier '(' [ FUN_ARG { ',' FUN_ARG } ] ')'
     FUN_ARG := TYPE identifier
 
@@ -57,14 +57,16 @@ Pointers can point to either a plain type, an identifier representing a struct o
 Structured types must always be declared before they are used. Forward declarations are supported as well.
 
     CLASS_DECL := 'class' identifier [ : identifier ] [ '{' { FIELD_DECL | METHOD_DECL } '}' ] ';'
-    METHOD_DECL := FUN_HEAD [ 'virtual' | 'override'] [ BLOCK_STMT ]
+    METHOD_DECL := FUN_HEAD [ [ 'virtual' | 'override' ] [ BLOCK_STMT | ';' ] | 'abstract' ';' ]
 
 Class is similar to struct, except it:
     * could inherit all content of its base type.
     * could declare special function - "method" that associates with the class: thus accessed only via "." or "->" operator over its class intance.
+
 Method is similiar to function, except it:
     * operates on a class instance via implicitly declared "this" and "base" variable without the instance being an argument.
     * could be redefinied in a class that inherits its class via use of "override" keyword if it was declared as "virtual".
+
 The "this" variable is a pointer to instance of method's class.
 The "base" variable is same as "this" variable, except its type is a pointer to base class of method's class. 
 

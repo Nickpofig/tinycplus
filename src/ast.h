@@ -8,7 +8,7 @@
 // internal
 #include "shared.h"
 
-namespace tinycpp {
+namespace tinycplus {
     class Type;
     class ASTVisitor;
 
@@ -32,23 +32,22 @@ namespace tinycpp {
 
     // [*] Hierarchy information
     public:
-        AST * parent = nullptr;
-        template<typename T>
-        T * findParent(std::optional<int> depth = std::nullopt) {
-            if (parent == nullptr) return nullptr;
-            if (auto result = dynamic_cast<T*>(parent)) return result;
-            if (depth.has_value()) {
-                if (depth.value() > 0) return parent->findParent<T>(depth.value() - 1);
-                else return nullptr;
-            }
-            return parent->findParent<T>();
-        }
-
-        bool isDescendentOf(AST * ancestor) {
-            if (this == ancestor) return true;
-            if (parent != nullptr) return parent->isDescendentOf(ancestor);
-            return false;
-        }
+        // AST * parent = nullptr;
+        // template<typename T>
+        // T * findParent(std::optional<int> depth = std::nullopt) {
+        //     if (parent == nullptr) return nullptr;
+        //     if (auto result = dynamic_cast<T*>(parent)) return result;
+        //     if (depth.has_value()) {
+        //         if (depth.value() > 0) return parent->findParent<T>(depth.value() - 1);
+        //         else return nullptr;
+        //     }
+        //     return parent->findParent<T>();
+        // }
+        // bool isDescendentOf(AST * ancestor) {
+        //     if (this == ancestor) return true;
+        //     if (parent != nullptr) return parent->isDescendentOf(ancestor);
+        //     return false;
+        // }
 
     // [*] Type information
     private:
@@ -452,8 +451,9 @@ namespace tinycpp {
     public:
         enum class Virtuality {
             None,
-            Base,
-            Override
+            Virtual,
+            Abstract,
+            Override,
         };
         Virtuality virtuality;
     public:
@@ -462,9 +462,10 @@ namespace tinycpp {
             ,virtuality{Virtuality::None}
         { }
     public:
-        bool isVirtualBase() const { return virtuality == Virtuality::Base; }
+        bool isAbstract() const { return virtuality == Virtuality::Abstract; }
+        bool isVirtual() const { return virtuality == Virtuality::Virtual; }
         bool isOverride() const { return virtuality == Virtuality::Override; }
-        bool isVirtual() const { return isVirtualBase() || isOverride(); }
+        bool isVirtualized() const { return isVirtual() || isOverride() || isAbstract(); }
 
         void print(ASTPrettyPrinter & p) const override {
             p << (*typeDecl) << " " << p.identifier << name.name() << p.symbol << "(";
@@ -477,12 +478,14 @@ namespace tinycpp {
             }
             p << p.symbol << ")";
             switch (virtuality) {
-            case Virtuality::Base:
+            case Virtuality::Virtual:
                 p << p.keyword << " " << symbols::KwVirtual.name() << " ";
                 break;
             case Virtuality::Override:
                 p << p.keyword << " " << symbols::KwOverride.name() << " ";
                 break;
+            case Virtuality::Abstract:
+                p << p.keyword << " " << symbols::KwAbstract.name() << " ";
             }
             p << (*body);
         }
@@ -1017,7 +1020,7 @@ namespace tinycpp {
             child->accept(this);
         }
 
-    }; // tinycpp::ASTVisitor
+    }; // tinycplus::ASTVisitor
 
     inline void AST::accept(ASTVisitor * v) { v->visit(this); }
     inline void ASTInteger::accept(ASTVisitor * v) { v->visit(this); }
@@ -1056,4 +1059,4 @@ namespace tinycpp {
     inline void ASTCall::accept(ASTVisitor * v) { v->visit(this); }
     inline void ASTCast::accept(ASTVisitor * v) { v->visit(this); }
 
-} // namespace tinycpp
+} // namespace tinycplus

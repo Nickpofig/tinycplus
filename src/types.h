@@ -3,14 +3,15 @@
 // standard
 #include <cassert>
 #include <optional>
+#include <algorithm>
 
 // internal
 #include "shared.h"
 #include "ast.h"
 
-namespace tinycpp {
+namespace tinycplus {
 
-    /** Representation of a tinycpp type.
+    /** Representation of a tinycplus type.
      */
     class Type {
     public: // subtypes
@@ -56,7 +57,7 @@ namespace tinycpp {
 
     private:
         virtual void toStream(std::ostream & s) const = 0;
-    }; // tinycpp::Type
+    }; // tinycplus::Type
 
 
     /** A type alias, i.e. a different name for same type.
@@ -85,7 +86,7 @@ namespace tinycpp {
         Symbol name_;
         Type * base_;
 
-    }; // tinycpp::Type::Alias
+    }; // tinycplus::Type::Alias
 
     /** Plain old data type declaration.
         These are created automatically by the backend for the primitive types supported by the language. In the case of tinyC, these are:
@@ -108,7 +109,7 @@ namespace tinycpp {
         }
 
         Symbol name_;
-    }; // tinycpp::Type::POD
+    }; // tinycplus::Type::POD
 
 
     /** Pointer to a type. 
@@ -183,21 +184,38 @@ namespace tinycpp {
             }
             s << ")";
         }
-    }; // tinycpp::Type::Function
+    }; // tinycplus::Type::Function
+
+    class FieldInfo {
+    public:
+        Symbol name;
+        Type * type;
+        AST * ast;
+    public:
+        FieldInfo(): name{""} { }
+        FieldInfo(Symbol name, Type * type, AST * ast):
+            name{name},
+            type{type},
+            ast{ast}
+        { }
+    };
+
+    class MethodInfo {
+    public:
+        Symbol name;
+        Symbol fullName;
+        Type::Function * type;
+        ASTMethodDecl * ast;
+    };
 
     /** Complex declaration.
      * 
         Keeps a mapping from the fields to their types.
      */
     class Type::Complex : public Type {
-    public:
-        struct Member {
-            Type * type;
-            AST * ast;
-        };
-    private:
-        std::unordered_map<Symbol, Member> members_;
-        std::vector<Symbol> order_;
+    protected:
+        std::unordered_map<Symbol, FieldInfo> fields_;
+        std::vector<Symbol> fieldsOrder_;
         std::optional<Symbol> constructorName_;
     protected:
         void throwMemberIsAlreadyDefined(Symbol name, AST * ast) {
@@ -213,62 +231,74 @@ namespace tinycpp {
             };
         }
     public:
-        virtual void registerMember(Symbol name, Type * type, AST * ast) {
+        virtual void registerField(Symbol name, Type * type, AST * ast) {
             checkMemberTypeIsFullyDefined(name, type, ast);
-            if (members_.find(name) != members_.end()) { 
+            if (fields_.find(name) != fields_.end()) { 
                 throwMemberIsAlreadyDefined(name, ast);
             }
-            members_.insert(std::make_pair(name, Member{type, ast}));
-            order_.push_back(name);
-        }
-
-        virtual void overrideMember(Symbol name, Type * type, AST * ast) {
-            checkMemberTypeIsFullyDefined(name, type, ast);
-            members_[name] = Member{type, ast};
-        }
-
-        virtual Type * getMemberType(Symbol name) const {
-            auto it = members_.find(name);
-            return it == members_.end() ? nullptr : it->second.type;
-        }
-
-        virtual AST * getMemberDeclaration(Symbol name) const {
-            auto it = members_.find(name);
-            return it == members_.end() ? nullptr : it->second.ast;
+            fields_.insert(std::make_pair(name, FieldInfo{name, type, ast}));
+            fieldsOrder_.push_back(name);
         }
 
         virtual bool requiresImplicitConstruction() const {
-            for (auto & member : members_) {
-                auto * memberType = member.second.type;
-                if (memberType->isPointer()) continue;
-                if (auto * complexMemberType = memberType->as<Type::Complex>();
-                    complexMemberType != nullptr && complexMemberType->requiresImplicitConstruction()
-                ) return true;
+            for (auto & field : fields_) {
+                auto * fieldType = field.second.type->as<Type::Complex>();
+                if (fieldType == nullptr) {
+                    continue;
+                }
+                if (fieldType->requiresImplicitConstruction()) {
+                    return true;
+                }
             }
             return false;
         }
 
+        virtual std::optional<FieldInfo> getFieldInfo(Symbol name) const {
+            auto it = fields_.find(name);
+            if (it == fields_.end()) {
+                return std::nullopt;
+            }
+            return it->second;
+        }
+
+        virtual Type * getMemberType(Symbol name) const {
+            auto field = getFieldInfo(name);
+            if (field.has_value()) return field.value().type;
+            return nullptr;
+        }
+
+        virtual void collectFieldsOrdered(std::vector<FieldInfo> & resultAppendList) const {
+            for (auto & name : fieldsOrder_) {
+                resultAppendList.push_back(fields_.at(name));
+            }
+        }
     public:
         Symbol getConstructorName() {
             if (!constructorName_.has_value()) {
-                constructorName_ = Symbol{STR("__tinycpp__make__" << toString())};
+                constructorName_ = symbols::startLanguageName()
+                    .add("make_")
+                    .add(toString())
+                    .end();
             }
             return constructorName_.value();
         }
 
-        void copyMembersTo(Type::Complex * other) {
-            for (auto & name : order_) {
-                other->members_.insert({name, members_[name]});
-                other->order_.push_back(name);
+        void copyFieldsTo(Type::Complex * other) {
+            for (auto & name : fieldsOrder_) {
+                auto field = fields_[name];
+                other->fields_.insert(std::make_pair(name, field));
+                other->fieldsOrder_.push_back(name);
             }
         }
 
-        void collectMembersOrdered(std::vector<std::pair<Symbol, Member>> & result) {
-            for (auto & name : order_) {
-                result.push_back({name, members_[name]});
-            }
-        }
-    }; // tinycpp::Type::Complex
+        /// TODO: remove this
+        // void copyMembersTo(Type::Complex * other) {
+        //     for (auto & name : fieldsOrder_) {
+        //         other->fields_.insert({name, fields_[name]});
+        //         other->fieldsOrder_.push_back(name);
+        //     }
+        // }
+    }; // tinycplus::Type::Complex
 
     /** Structure declaration.
      * 
@@ -276,10 +306,6 @@ namespace tinycpp {
      */
     class Type::Struct : public Type::Complex {
     public:
-        Struct(ASTStructDecl * ast):
-            ast_{ast} {
-        }
-
         ASTStructDecl * ast() const {
             return ast_;
         }
@@ -303,7 +329,7 @@ namespace tinycpp {
         }
 
         ASTStructDecl * ast_;
-    }; // tinycpp::Type::Struct
+    }; // tinycplus::Type::Struct
 
 
     class Type::VTable : public Type::Complex {
@@ -322,6 +348,16 @@ namespace tinycpp {
         bool requiresImplicitConstruction() const override {
             return false;
         }
+    public: // overrides
+        void registerField(Symbol name, Type * type, AST * ast) override {
+            checkMemberTypeIsFullyDefined(name, type, ast);
+            if (fields_.find(name) == fields_.end()) {
+                fields_.insert(std::make_pair(name, FieldInfo{name, type, ast}));
+                fieldsOrder_.push_back(name);
+            } else {
+                fields_[name] = FieldInfo{name, type, ast};
+            }
+        }
     private:
         friend class TypeChecker;
         void toStream(std::ostream & s) const override {
@@ -334,24 +370,21 @@ namespace tinycpp {
         Keeps a mapping from the fields and methods to their types and the AST where the type was declared.
      */
     class Type::Class : public Type::Complex {
-    public:
-        struct MethodInfo {
-            Symbol name;
-            Symbol fullName;
-            Type::Function * type;
-            Type::Class * targetClassType;
-            ASTMethodDecl * ast;
-        };
     private:
-        ASTClassDecl * ast_;
+        ASTClassDecl * ast_ = nullptr;
         Type::Class * base_ = nullptr;
         Type::VTable * vtable_ = nullptr;
-        std::vector<MethodInfo> methods_;
+        std::unordered_map<Symbol, MethodInfo> methods_;
+        bool isAbstract_ = false;
     public:
-        Class(ASTClassDecl * ast):
-            ast_{ast} {
+        Class(Type::VTable * vtable):
+            vtable_{vtable} {
         }
     public:
+        Symbol getName() const {
+            return ast_->name;
+        }
+
         ASTClassDecl * ast() const {
             return ast_;
         }
@@ -366,22 +399,11 @@ namespace tinycpp {
                 ast_->location()
             };
             base_ = type;
-            vtable_ = type->vtable_;
+            base_->getVirtualTable()->copyFieldsTo(vtable_);
         }
 
         Type::VTable * getVirtualTable() const {
             return vtable_;
-        }
-
-        void setVirtualTable(Type::VTable * type) {
-            if (vtable_ != nullptr) {
-                vtable_->copyMembersTo(type);
-            }
-            vtable_ = type;
-        }
-
-        bool hasOwnVirtualTable() {
-            return vtable_ != nullptr && (base_ == nullptr || base_->vtable_ != vtable_);
         }
 
         void updateDefinition(ASTClassDecl * ast) {
@@ -389,9 +411,13 @@ namespace tinycpp {
             ast_ = ast;
         }
 
+        bool hasOwnVirtualTable() {
+            return vtable_ != nullptr && (base_ == nullptr || base_->vtable_ != vtable_);
+        }
+
         bool hasMethod(Symbol name, bool includeBaseInSearch) const {
             for (auto & method : methods_) {
-                if (method.name == name) {
+                if (method.first == name) {
                     return true;
                 }
             }
@@ -401,19 +427,48 @@ namespace tinycpp {
             return false;
         }
 
-        MethodInfo getMethodInfo(Symbol name, bool searchInBase = true) const {
+        std::optional<MethodInfo> getMethodInfo(Symbol name, bool searchInBase = true) const {
             for (auto & method : methods_) {
-                if (method.name == name) {
-                    return method;
+                if (method.first == name) {
+                    return method.second;
                 }
             }
             if (base_ != nullptr) {
                 return base_->getMethodInfo(name);
             }
-            throw ParserError {
-                STR("There is no method with name: " << name.name()),
-                ast_->location()
-            };
+            return std::nullopt;
+            // throw ParserError {
+            //     STR("There is no method with name: " << name.name()),
+            //     ast_->location()
+            // };
+        }
+
+        bool isAbstract() const {
+            return isAbstract_;
+        }
+
+        void registerMethod(Symbol name, Type::Function * type, ASTMethodDecl * ast) {
+            this->isAbstract_ |= ast->isAbstract();
+            if (hasMethod(name, false)) {
+                throwMemberIsAlreadyDefined(name, ast);
+            }
+            if (ast->isOverride()) {
+                if (base_ == nullptr) throw ParserError {
+                    STR("There is no base class to override"),
+                    ast->location()
+                };
+                if (!base_->hasMethod(name, true)) throw ParserError {
+                    STR("There is no base method called " << name << " to override"),
+                    ast->location()
+                };
+            }
+            bool isVirtual = ast->isVirtualized();
+            auto fullName = symbols::startLanguageName()
+                .add(toString())
+                .add(isVirtual ? "__virtual__" : "__")
+                .add(name)
+                .end();
+            methods_.insert({ name, MethodInfo{name, fullName, type, ast} });
         }
 
     public: // overrides
@@ -423,90 +478,48 @@ namespace tinycpp {
             return ast_ != nullptr && ast_->isDefinition;
         }
 
-        void registerMember(Symbol name, Type * type, AST * ast) override {
-            auto * method = ast->as<ASTMethodDecl>();
-            if (method != nullptr) {
-                bool isRedeclaring = hasMethod(name, false);
-                if (isRedeclaring
-                    && !getMethodInfo(name, false).ast->body
-                    && !method->body
-                ) {
-                    throwMemberIsAlreadyDefined(name, ast);
-                }
-                if (method->isOverride()) {
-                    if (base_ == nullptr) throw ParserError{
-                        STR("There is no base class to override"),
-                        ast->location()
-                    };
-                    if (!base_->hasMethod(name, true)) throw ParserError{
-                        STR("There is no base method called " << name << " to override"),
-                        ast->location()
-                    };
-                    // reassigning new override implementation
-                }
-                bool isVirtual = method->isVirtual();
-                auto fullName = Symbol{
-                    STR("__tinycpp__" << toString() << (isVirtual ? "__virtual__" : "__") << name.name())
-                };
-                if (isRedeclaring) {
-                    for (auto & it : methods_) {
-                        if (it.name == name) {
-                            it = MethodInfo{name, fullName, type->as<Type::Function>(), this, method};
-                            break;
-                        }
-                    }
-                } else {
-                    methods_.push_back(MethodInfo{name, fullName, type->as<Type::Function>(), this, method});
-                }
-            }
-            else {
-                if (auto * type = getMemberType(name); type != nullptr) {
-                    throwMemberIsAlreadyDefined(name, ast);
-                }
-                Type::Complex::registerMember(name, type, ast);
-            }
-        }
-
         bool requiresImplicitConstruction() const override {
             return true;
         }
 
+        std::optional<FieldInfo> getFieldInfo(Symbol name) const override {
+            auto fieldInfo = Complex::getFieldInfo(name);
+            if (fieldInfo.has_value()) return fieldInfo.value();
+            if (base_ != nullptr) {
+                return base_->getFieldInfo(name);
+            }
+            return std::nullopt;
+        }
+
         Type * getMemberType(Symbol name) const override {
-            auto * type = Type::Complex::getMemberType(name);
-            if (type == nullptr) {
-                for (auto & method : methods_) {
-                    if (method.name == name) {
-                        return method.type;
-                    }
-                }
-            }
-            if (type == nullptr && base_ != nullptr) {
-                type = base_->getMemberType(name);
-            }
-            return type;
+            auto field = getFieldInfo(name);
+            if (field.has_value()) return field.value().type;
+            auto method = getMethodInfo(name);
+            if (method.has_value()) return method.value().type;
+            return nullptr;
         }
 
-        AST * getMemberDeclaration(Symbol name) const override {
-            auto * ast = Type::Complex::getMemberDeclaration(name);
-            if (ast == nullptr) {
-                for (auto & method : methods_) {
-                    if (method.name == name) {
-                        return method.ast;
-                    }
-                }
+        void collectFieldsOrdered(std::vector<FieldInfo> & result) const override {
+            if (base_ != nullptr) {
+                base_->collectFieldsOrdered(result);
             }
-            if (ast == nullptr && base_ != nullptr) {
-                ast = base_->getMemberDeclaration(name);
-            }
-            return ast;
+            Type::Complex::collectFieldsOrdered(result);
         }
 
+        void collectVirtualTables(std::vector<Type::VTable*> & result) const {
+            // ! Assuming that class hierarchy is always finite, then...
+            if (base_ != nullptr) {
+                assert(base_->vtable_ != nullptr && "oh no, vtable is assumed to be unique, therefor -> not null");
+                base_->collectVirtualTables(result);
+            }
+            result.push_back(vtable_);
+        }
     private:
         friend class TypeChecker;
         void toStream(std::ostream & s) const override {
             s << ast_->name.name();
         }
-    }; // tinycpp::Type::Class
+    }; // tinycplus::Type::Class
 
 
     template<typename T>
@@ -519,4 +532,4 @@ namespace tinycpp {
         }
         return nullptr;
     }
-} // namespace tinycpp
+} // namespace tinycplus

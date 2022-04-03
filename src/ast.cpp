@@ -1,6 +1,6 @@
 #include "ast.h"
 
-namespace tinycpp {
+namespace tinycplus {
 
     bool ASTBinaryOp::hasAddress() const {
         return false;
@@ -10,4 +10,4 @@ namespace tinycpp {
         return false;
     }
 
-} // namespace tinycpp
+} // namespace tinycplus

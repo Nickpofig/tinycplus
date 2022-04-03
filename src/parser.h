@@ -7,7 +7,7 @@
 #include "shared.h"
 #include "ast.h"
 
-namespace tinycpp {
+namespace tinycplus {
 
     class Parser : public ParserBase {
     public:
@@ -27,7 +27,7 @@ namespace tinycpp {
          */
         bool isKeyword(Token const & t) {
             return 
-                // tinycpp keywords
+                // tinycplus keywords
                 t == Symbol::KwBreak
                 || t == Symbol::KwCase
                 || t == Symbol::KwCast
@@ -46,7 +46,7 @@ namespace tinycpp {
                 || t == Symbol::KwTypedef
                 || t == Symbol::KwVoid
                 || t == Symbol::KwWhile
-                // tinycpp keywords
+                // tinycplus keywords
                 || symbols::isParsebleKeyword(t.valueSymbol());
         }
 
