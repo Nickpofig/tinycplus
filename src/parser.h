@@ -135,6 +135,7 @@ namespace tinycplus {
         std::unique_ptr<ASTType> TYPE_FUN_RET();
         std::unique_ptr<ASTStructDecl> STRUCT_DECL();
         std::unique_ptr<ASTFunPtrDecl> FUNPTR_DECL();
+        std::unique_ptr<ASTInterfaceDecl> Parser::INTERFACE_DECL();
         std::unique_ptr<ASTClassDecl> CLASS_DECL();
         std::unique_ptr<AST> EXPR_OR_VAR_DECL();
         std::unique_ptr<ASTVarDecl> VAR_DECL();

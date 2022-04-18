@@ -51,6 +51,10 @@ namespace tinycplus {
             assert(!isRootLevel());
             return current_ast_hierarchy_.back();
         }
+        AST * peekAst(int depth) {
+            assert(current_ast_hierarchy_.size() >= depth);
+            return *(current_ast_hierarchy_.rbegin() + depth);
+        }
         void registerDeclaration(Symbol realName, Symbol name, int definitionsLimit = 0) {
             auto result = definitions_.find(realName);
             if (result == definitions_.end()) {
@@ -313,10 +317,12 @@ namespace tinycplus {
         void visit(ASTNamedType * ast) override;
         void visit(ASTSequence * ast) override;
         void visit(ASTBlock * ast) override;
+        void visit(ASTProgram * ast) override;
         void visit(ASTVarDecl * ast) override;
         void visit(ASTFunDecl * ast) override;
         void visit(ASTFunPtrDecl * ast) override;
         void visit(ASTStructDecl * ast) override;
+        void visit(ASTInterfaceDecl * ast) override;
         void visit(ASTClassDecl * ast) override;
         void visit(ASTMethodDecl * ast) override;
         void visit(ASTIf * ast) override;

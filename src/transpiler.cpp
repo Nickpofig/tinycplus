@@ -87,18 +87,39 @@ namespace tinycplus {
     }
 
     void Transpiler::visit(ASTBlock * ast) {
-        bool isIndented = !isRootLevel();
         pushAst(ast);
         /// TODO: refactor code -> root is a special case that happens once - no need to check for it for all blocks
-        if (isIndented) { // ..when not the root context
-            printSymbol(Symbol::CurlyOpen);
-            printer_.indent();
-            if (auto * function = peekAst()->as<ASTFunDecl>();
-                function != nullptr // is a function
-                && function->as<ASTMethodDecl>() == nullptr // but not a method
-                && function->name == symbols::Entry // and it is the program entry
-                && symbols::Entry != symbols::NoEntry // ...just in case
-            ) {
+        printSymbol(Symbol::CurlyOpen);
+        printer_.indent();
+        if (auto * function = peekAst()->as<ASTFunDecl>();
+            function != nullptr // is a function
+        ) {
+            if (auto method = function->as<ASTMethodDecl>()) {
+                auto * classType = peekAst(1)->as<ASTClassDecl>()->getType()->as<Type::Class>();
+                if (classType != nullptr) {
+                    auto methodInfo = classType->getMethodInfo(method->name);
+                    assert(methodInfo.has_value());
+                    bool isInterface = methodInfo.value().isInterfaceMethod;
+                    if (isInterface) {
+                        printType(classType);
+                        printSpace();
+                        printSymbol(Symbol::Mul);
+                        printSpace();
+                        printIdentifier(symbols::KwThis);
+                        printSpace();
+                        printSymbol(Symbol::Assign);
+                        printSpace();
+                        printKeyword(Symbol::KwCast);
+                        printSymbol(Symbol::Lt);
+                        printType(classType);
+                        printSymbol(Symbol::Mul);
+                        printSymbol(Symbol::Gt);
+                        printSymbol(Symbol::ParOpen);
+                        printIdentifier(symbols::ThisInterface);
+                        printSymbol(Symbol::ParClose);
+                    }
+                }
+            } else if (function->name == symbols::Main) {
                 // Program Entry must be fully declared only after all class declarations and never earlier.
                 // Otherwise resulted TinyC code won't compile.
                 programEntryWasDefined_ = true;
@@ -115,14 +136,12 @@ namespace tinycplus {
                 }
                 printComment(" === Running the rest of the program === ");
             }
-        }
+        }  
         for (auto & i : ast->body) {
             printer_.newline();
             visitChild(i.get());
             /// TODO: check semicolon is set correctly when necessary
-            if (isIndented
-                && !i->as<ASTFunDecl>()
-                && !i->as<ASTBlock>()
+            if (!i->as<ASTBlock>()
                 && !i->as<ASTIf>()
                 && !i->as<ASTSwitch>()
                 && !i->as<ASTWhile>()
@@ -131,12 +150,22 @@ namespace tinycplus {
                 printSymbol(Symbol::Semicolon);
             }
         }
-        if (isIndented) { // ..when not the root context
-            printer_.dedent();
-            printer_.newline();
-            printSymbol(Symbol::CurlyClose);
-        }
+        printer_.dedent();
         printer_.newline();
+        printSymbol(Symbol::CurlyClose);
+        printer_.newline();
+        popAst();
+    }
+
+    void Transpiler::visit(ASTProgram * ast) {
+        pushAst(ast);
+        for (auto & i : ast->body) {
+            visitChild(i.get());
+            if (!i->as<ASTFunDecl>()) {
+                printSymbol(Symbol::Semicolon);
+            }
+            printer_.newline();
+        }
         popAst();
     }
 
@@ -236,6 +265,63 @@ namespace tinycplus {
         popAst();
     }
 
+
+
+
+    void Transpiler::visit(ASTInterfaceDecl * ast) {
+        pushAst(ast);
+        // validateName(ast->name);
+        // auto interfaceType = ast->getType()->as<Type::Interface>();
+        // printer_.newline();
+        // /// TODO:
+        // /// Interface ID (comment)
+        // printComment(STR("ID: "), true);
+        // /// Interface Impl struct
+        // /// Interface View struct
+        // /// Interface View make function
+
+        // // * header
+        // printKeyword(Symbol::KwStruct);
+        // printSpace();
+        // printIdentifier(ast->name.name());
+        // // ** body begins
+        // printSymbol(Symbol::CurlyOpen);
+        // printer_.indent();
+        // /// TODO: finish tranpilation code!
+        // // ** vtable pointer declaration
+        // printer_.newline();
+        // printType(classType->isAbstract() ? types_.getTypeVoid() : vtableType);
+        // printSymbol(Symbol::Mul);
+        // printSpace();
+        // printIdentifier(symbols::VTable);
+        // printSymbol(Symbol::Semicolon);
+        // // ** class fields declaration
+        // std::vector<FieldInfo> classFields;
+        // classType->collectFieldsOrdered(classFields);
+        // for (auto & i : classFields) {
+        //     printer_.newline();
+        //     visitChild(i.ast);
+        //     printSymbol(Symbol::Semicolon);
+        // }
+        // // ** class declaration closed
+        // printer_.dedent();
+        // printer_.newline();
+        // printSymbol(Symbol::CurlyClose);
+        // printSymbol(Symbol::Semicolon);
+        // printer_.newline();
+        // // ** methods declaration
+        // for (auto & i : ast->methods) {
+        //     if (i->isAbstract()) continue;
+        //     printer_.newline();
+        //     visitChild(i.get());
+        // }
+        // printer_.newline();
+        popAst();
+    }
+
+
+
+
     void Transpiler::visit(ASTClassDecl * ast) {
         pushAst(ast);
         validateName(ast->name);
@@ -309,6 +395,7 @@ namespace tinycplus {
         printSpace();
         // * method name
         auto classType = classParent->getType()->as<Type::Class>();
+        bool isInterfaceMethod = classType->getMethodInfo(ast->name).value().isInterfaceMethod;
         auto info = classType->getMethodInfo(ast->name).value();
         registerDeclaration(info.fullName, ast->name, 1);
         printIdentifier(info.fullName);
@@ -318,7 +405,10 @@ namespace tinycplus {
         printType(classParent->name.name());
         printSymbol(Symbol::Mul);
         printSpace();
-        printIdentifier(symbols::KwThis);
+        printIdentifier(isInterfaceMethod
+            ? symbols::ThisInterface
+            : symbols::KwThis
+        );
         if (ast->args.size() > 0) {
             printSymbol(Symbol::Comma);
             printSpace();

@@ -31,12 +31,14 @@ namespace tinycplus {
         TODO the simple try & fail & try something else produces ugly error messages.
         */
     std::unique_ptr<AST> Parser::PROGRAM() {
-        std::unique_ptr<ASTBlock> result{new ASTBlock{top()}};
+        std::unique_ptr<ASTProgram> result{new ASTProgram{top()}};
         while (! eof()) {
             if (top() == Symbol::KwStruct) {
                 result->body.push_back(STRUCT_DECL());
             } else if (top() == symbols::KwClass) {
                 result->body.push_back(CLASS_DECL());
+            } else if (top() == symbols::KwInterface) {
+                result->body.push_back(INTERFACE_DECL());
             } else if (top() == Symbol::KwTypedef) {
                 result->body.push_back(FUNPTR_DECL());
             } else {
@@ -100,6 +102,8 @@ namespace tinycplus {
                 method->virtuality = ASTMethodDecl::Virtuality::Override;
             } else if (condPop(symbols::KwAbstract)) {
                 method->virtuality = ASTMethodDecl::Virtuality::Abstract;
+            } else {
+                method->virtuality = ASTMethodDecl::Virtuality::None;
             }
         }
         // if there is body, parse it, otherwise leave empty as it is just a declaration
@@ -358,12 +362,36 @@ namespace tinycplus {
         return result;
     }
 
+    std::unique_ptr<ASTInterfaceDecl> Parser::INTERFACE_DECL() {
+        auto const & start = pop(symbols::KwInterface);
+        auto interfaceName = pop(Token::Kind::Identifier).valueSymbol();
+        std::unique_ptr<ASTInterfaceDecl> interfaceDecl {new ASTInterfaceDecl{start, interfaceName}};
+        addTypeName(interfaceName);
+        if (condPop(Symbol::CurlyOpen)) {
+            while (! condPop(Symbol::CurlyClose)) {
+                // parsing field and method
+                auto member = FUN_DECL(true);
+                if (auto * method = member->as<ASTMethodDecl>()) {
+                    if (method->body) throw ParserError {
+                        STR("Interface's method: " << method->name.name() << " must not have a body."),
+                        method->location(),
+                    };
+                    interfaceDecl->methods.push_back(std::unique_ptr<ASTMethodDecl>(method));
+                }
+                member.release();
+            }
+        }
+        pop(Symbol::Semicolon);
+        return interfaceDecl;
+    }
+
     /* CLASS_DECL := 'class' identifier [ : identifier ] [ '{' { TYPE identifier ';' | FUN_DECL } '}' ] ';'
         */
     std::unique_ptr<ASTClassDecl> Parser::CLASS_DECL() {
         auto const & start = pop(symbols::KwClass);
-        std::unique_ptr<ASTClassDecl> classDecl{new ASTClassDecl{start, pop(Token::Kind::Identifier).valueSymbol()}};
-        addTypeName(classDecl->name);
+        auto className = pop(Token::Kind::Identifier).valueSymbol();
+        std::unique_ptr<ASTClassDecl> classDecl{new ASTClassDecl{start, className}};
+        addTypeName(className);
         // Parses base class
         if (condPop(Symbol::Colon)) {
             classDecl->baseClass = TYPE();
@@ -371,7 +399,7 @@ namespace tinycplus {
         // Parses body
         if (condPop(Symbol::CurlyOpen)) {
             classDecl->isDefinition = true;
-            std::unordered_set<ASTMethodDecl*> undefinedMethods {};
+            // std::unordered_set<ASTMethodDecl*> undefinedMethods {};
             while (! condPop(Symbol::CurlyClose)) {
                 // parsing field and method
                 auto member = FUN_OR_VAR_DECL(true);
@@ -380,15 +408,18 @@ namespace tinycplus {
                 } else if (auto * method = member->as<ASTMethodDecl>()) { // saving as method
                     classDecl->methods.push_back(std::unique_ptr<ASTMethodDecl>(method));
                     if (!method->body && !method->isAbstract()) {
-                        undefinedMethods.insert(method);
+                        // undefinedMethods.insert(method);
+                        throw ParserError {
+                            STR("Method: " << method->name.name() << " was declared but its body was not defined"),
+                            method->location()
+                        };
                     }
                 }
                 member.release();
             }
-            if (!undefinedMethods.empty()) {
-                auto * ast = *undefinedMethods.begin();
-                throw ParserError{STR("Method: " << ast->name.name() << " was declared but its body was not defined"), ast->location(), false};
-            }
+            // if (!undefinedMethods.empty()) {
+            //     auto * ast = *undefinedMethods.begin();
+            // }
         }
         pop(Symbol::Semicolon);
         return classDecl;

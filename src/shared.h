@@ -59,18 +59,25 @@ namespace tinycplus {
     };
 
     namespace symbols {
-        static Symbol KwClass {"class"}; // special data model representing an object.
+        static Symbol KwClass {"class"}; // TinyC+ class -> special data model representing an object.
+        static Symbol KwInterface {"interface"}; // TinyC+ interface -> language polymorphism entity.
         static Symbol KwVirtual {"virtual"}; // marks the method as virtual.
         static Symbol KwOverride {"override"}; // marks the method as override of base class virtual method.
         static Symbol KwAbstract {"abstract"}; // marks the method as abstract.
         static Symbol KwThis {"this"}; // compulsory first argument of any method, representing reference to the target.
         static Symbol KwBase {"base"}; // cast of "this" to the base type of the current class.
+        static Symbol Main {"main"}; // main function name
+        static Symbol ThisInterface {"__face__"}; // instead of "this" for interface methods
         static Symbol VTable {"__vtable__"}; // name for class field with vtable pointer type.
         static Symbol NoEntry{"__program__entry__"};
         extern Symbol Entry;
 
         bool static isParsebleKeyword(Symbol const & s) {
-            return s == KwClass || s == KwVirtual || s == KwOverride || s == KwAbstract;
+            return s == KwClass
+                || s == KwInterface
+                || s == KwVirtual
+                || s == KwOverride
+                || s == KwAbstract;
         }
 
         bool static isReservedName(Symbol const & s) {

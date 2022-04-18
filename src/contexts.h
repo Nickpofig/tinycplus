@@ -91,13 +91,23 @@ namespace tinycplus {
                 return result;
             } else {
                 T * result = dynamic_cast<T*>(i->second.get());
+                if (result == nullptr) throw std::runtime_error {
+                    STR("Name: " << name.name() << " already reserved for another type.")
+                };
                 return result;
             }
         }
     public: // mutators
         Type::Struct * getOrCreateStructType(Symbol name) {
-            auto maker = [] () { return new Type::Struct{}; };
+            auto maker = [name] () { return new Type::Struct{name}; };
             return getOrCreateNonAliasType<Type::Struct>(name, maker);
+        }
+
+        Type::Interface * getOrCreateInterfaceType(Symbol name) {
+            auto maker = [name] () {
+                return new Type::Interface{name};
+            };
+            return getOrCreateNonAliasType<Type::Interface>(name, maker);
         }
 
         Type::Class * getOrCreateClassType(Symbol name) {
@@ -107,7 +117,7 @@ namespace tinycplus {
                     .add("_vtable")
                     .end();
                 auto * vtable = new Type::VTable{vtableName};
-                return new Type::Class{vtable};
+                return new Type::Class{name, vtable};
             };
             return getOrCreateNonAliasType<Type::Class>(name, maker);
         }
@@ -147,10 +157,10 @@ namespace tinycplus {
             }
         }
 
-        void addMethodToClass(ASTMethodDecl * methodAst, Type::Class * classType) {
+        void addMethodToClass(ASTMethodDecl * methodAst, Type::Class * classType, bool isInterfaceMethod) {
             auto methodName = methodAst->name;
             auto * functionType = methodAst->getType()->as<Type::Function>();
-            classType->registerMethod(methodName, functionType, methodAst);
+            classType->registerMethod(methodName, functionType, methodAst, isInterfaceMethod);
             if (methodAst->isVirtualized()) {
                 auto * vtable = classType->getVirtualTable();
                 auto functionPointerName = symbols::startLanguageName()

@@ -102,6 +102,16 @@ namespace tinycplus {
         names_.leaveCurrentScope();
     }
 
+    void TypeChecker::visit(ASTProgram * ast) { 
+        names_.enterBlockScope();
+        // Sets default result type of a block as void if non other type has been set
+        for (auto & i : ast->body) {
+            auto * statementResultType = visitChild(i);
+        }
+        ast->setType(types_.getTypeVoid());
+        names_.leaveCurrentScope();
+    }
+
     void TypeChecker::visit(ASTVarDecl * ast) {
         auto * t = visitChild(ast->type);
         checkTypeCompletion(t, ast);
@@ -156,39 +166,60 @@ namespace tinycplus {
     void TypeChecker::visit(ASTMethodDecl * ast) {
         // creates function type
         auto context = pop<Context::Complex>();
-        auto * classType = context->complexType->as<Type::Class>();
-        std::unique_ptr<Type::Function> ftype{new Type::Function{visitChild(ast->typeDecl)}};
-        checkTypeCompletion(ftype->returnType(), ast->typeDecl);
-        // adds argument types
-        ftype->addArgument(types_.getOrCreatePointerType(classType));
-        for (auto & i : ast->args) {
-            auto * argType = visitChild(i->type);
-            checkTypeCompletion(argType, i->type);
-            ftype->addArgument(argType);
-        }
-        // registers function type
-        auto * functionType = types_.getOrCreateFunctionType(std::move(ftype));
-        ast->setType(functionType);
-        auto methodName = ast->name;
-        // registers self as member of the class
-        types_.addMethodToClass(ast, classType);
-        if (ast->body) {
-            // enters the context and add all arguments as local variables
-            names_.enterFunctionScope(functionType->returnType());
-            {
-                names_.addVariable(symbols::KwThis, types_.getOrCreatePointerType(classType));
-                if (auto * base = classType->getBase()) {
-                    names_.addVariable(symbols::KwBase, types_.getOrCreatePointerType(classType->getBase()));
-                }
-                for (auto & i : ast->args) {
-                    names_.addVariable(i->name->name, i->type->getType());
-                }
-                // typecheck the method body
-                auto * actualReturn = visitChild(ast->body);
-                checkReturnType(functionType, actualReturn, ast);
+        if (auto * classType = context->complexType->as<Type::Class>()) {
+            std::unique_ptr<Type::Function> ftype{new Type::Function{visitChild(ast->typeDecl)}};
+            checkTypeCompletion(ftype->returnType(), ast->typeDecl);
+            // adds argument types
+            auto methodName = ast->name;
+            bool isInterfaceMethod = classType->isInterfaceMethod(methodName);
+            auto * targetType = isInterfaceMethod
+                ? types_.getOrCreatePointerType(types_.getTypeVoid())
+                : types_.getOrCreatePointerType(classType);
+            ftype->addArgument(targetType);
+            for (auto & i : ast->args) {
+                auto * argType = visitChild(i->type);
+                checkTypeCompletion(argType, i->type);
+                ftype->addArgument(argType);
             }
-            // leaves the method context
-            names_.leaveCurrentScope();
+            // registers function type
+            auto * functionType = types_.getOrCreateFunctionType(std::move(ftype));
+            ast->setType(functionType);
+            // registers self as member of the class
+            types_.addMethodToClass(ast, classType, isInterfaceMethod);
+            if (ast->body) {
+                // enters the context and add all arguments as local variables
+                names_.enterFunctionScope(functionType->returnType());
+                {
+                    names_.addVariable(symbols::KwThis, types_.getOrCreatePointerType(classType));
+                    if (auto * base = classType->getBase()) {
+                        names_.addVariable(symbols::KwBase, types_.getOrCreatePointerType(classType->getBase()));
+                    }
+                    for (auto & i : ast->args) {
+                        names_.addVariable(i->name->name, i->type->getType());
+                    }
+                    // typecheck the method body
+                    auto * actualReturn = visitChild(ast->body);
+                    checkReturnType(functionType, actualReturn, ast);
+                }
+                // leaves the method context
+                names_.leaveCurrentScope();
+            }
+        } else if (auto * interfaceType = context->complexType->as<Type::Interface>()) {
+            std::unique_ptr<Type::Function> ftype{new Type::Function{visitChild(ast->typeDecl)}};
+            checkTypeCompletion(ftype->returnType(), ast->typeDecl);
+            // adds argument types
+            ftype->addArgument(types_.getOrCreatePointerType(types_.getTypeVoid()));
+            for (auto & i : ast->args) {
+                auto * argType = visitChild(i->type);
+                checkTypeCompletion(argType, i->type);
+                ftype->addArgument(argType);
+            }
+            // registers function type
+            auto * functionType = types_.getOrCreateFunctionType(std::move(ftype));
+            ast->setType(functionType);
+            auto methodName = ast->name;
+            // registers self as member of the class
+            interfaceType->registerField(methodName, types_.getOrCreatePointerType(functionType), ast);
         }
     }
 
@@ -197,13 +228,10 @@ namespace tinycplus {
     void TypeChecker::visit(ASTStructDecl * ast) { 
         Type::Struct * type = types_.getOrCreateStructType(ast->name);
         if (type == nullptr) {
-            throw ParserError{STR("Type " << ast->name.name() << " already defined and is not a struct"), ast->location()};
+            throw ParserError{STR("Type " << ast->name.name() << " already declared and it is not a struct"), ast->location()};
         }
-        if (type->isFullyDefined()) {
-            throw ParserError{STR("Type " << ast->name.name() << " already fully defined"), ast->location()};
-        }
+        updatePartialDecl(type, ast);
         ast->setType(type);
-        type->updateDefinition(ast);
         if (ast->isDefinition) {
             for (auto & i : ast->fields) {
                 auto position = push<Context::Complex>({type});
@@ -213,23 +241,37 @@ namespace tinycplus {
         }
     }
 
+
+
+
+    void TypeChecker::visit(ASTInterfaceDecl * ast) {
+        auto * type = types_.getOrCreateInterfaceType(ast->name);
+        ast->setType(type);
+        for (auto & i : ast->methods) {
+            auto position = push<Context::Complex>({type});
+            visitChild(i);
+            wipeContext(position);
+        }
+    }
+
+
+
+
     /** Type checking a structure declaration creates the type.
      */
     void TypeChecker::visit(ASTClassDecl * ast) {
         auto * type = types_.getOrCreateClassType(ast->name);
-        if (type == nullptr) {
-            throw ParserError{STR("Type " << ast->name.name() << " already defined and is not a class"), ast->location()};
-        }
-        if (type->isFullyDefined()) {
-            throw ParserError{STR("Type " << ast->name.name() << " already fully defined"), ast->location()};
-        }
+        updatePartialDecl(type, ast);
         ast->setType(type);
         if (ast->baseClass) {
             auto * baseType = visitChild(ast->baseClass)->as<Type::Class>();
             assert(baseType != nullptr);
+            if (!isDefined(baseType)) throw ParserError{
+                STR("[T2] A base type must be fully defined before inherited."),
+                ast->location()
+            };
             type->setBase(baseType);
         }
-        type->updateDefinition(ast);
         if (ast->isDefinition) {
             for (auto & i : ast->fields) {
                 auto position = push<Context::Complex>({type});

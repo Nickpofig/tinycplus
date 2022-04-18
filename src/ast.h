@@ -9,10 +9,9 @@
 #include "shared.h"
 
 namespace tinycplus {
+
     class Type;
     class ASTVisitor;
-
-    // AST custom user Data support
 
     class AST : public ASTBase {
     protected:
@@ -26,30 +25,14 @@ namespace tinycplus {
         virtual bool hasAddress() const {
             return false;
         }
-
-        template<typename T>
-        T * as() { return dynamic_cast<T*>(this); }
-
-    // [*] Hierarchy information
-    public:
-        // AST * parent = nullptr;
-        // template<typename T>
-        // T * findParent(std::optional<int> depth = std::nullopt) {
-        //     if (parent == nullptr) return nullptr;
-        //     if (auto result = dynamic_cast<T*>(parent)) return result;
-        //     if (depth.has_value()) {
-        //         if (depth.value() > 0) return parent->findParent<T>(depth.value() - 1);
-        //         else return nullptr;
-        //     }
-        //     return parent->findParent<T>();
-        // }
-        // bool isDescendentOf(AST * ancestor) {
-        //     if (this == ancestor) return true;
-        //     if (parent != nullptr) return parent->isDescendentOf(ancestor);
-        //     return false;
-        // }
-
-    // [*] Type information
+        template<typename T> T * as() {
+            return dynamic_cast<T*>(this);
+        }
+        virtual void print(ASTPrettyPrinter & p) const {
+            /// NOTE: In this transpiler [print] function of ASTBase will not be used
+            throw std::runtime_error("AST pretty print is not implemented");
+        };
+    // -----Type support----
     private:
         Type * type_ = nullptr;
     public: // methods
@@ -69,54 +52,49 @@ namespace tinycplus {
                 throw ParserError("Different type already set", location());
             type_ = t;
         }
-
-
-    // [*] AST Visitor support
+    // ----AST Visitor support----
     protected:
         friend class ASTVisitor;
         virtual void accept(ASTVisitor * v) = 0;
     };
 
+
+
+
     class ASTInteger : public AST {
     public:
         int64_t value;
-
+    public:
         ASTInteger(Token const & t):
             AST{t},
             value{t.valueInt()} {
         }
-
-        void print(ASTPrettyPrinter & p) const override {
-            p << p.numberLiteral << value;
-        }
-
     protected:
         void accept(ASTVisitor * v) override;
-
     };
+
+
+
 
     class ASTDouble : public AST {
     public:
         double value;
-
+    public:
         ASTDouble(Token const & t):
             AST{t},
             value{t.valueDouble()} {
         }
-
-        void print(ASTPrettyPrinter & p) const override {
-            p << p.numberLiteral << value;
-        }
-
     protected:
         void accept(ASTVisitor * v) override;
-
     };
+
+
+
 
     class ASTChar : public AST {
     public:
         char value;
-
+    public:
         ASTChar(Token const & t):
             AST{t} {
             std::string const & s{t.valueString()};
@@ -126,22 +104,17 @@ namespace tinycplus {
                 throw ParserError(STR("Expected single character, but " << s.size() << " characters found in '" << s << "'"), t.location(), false);
             value = s[0];
         }
-
-        void print(ASTPrettyPrinter & p) const override {
-            std::stringstream ss;
-            ss << '\'' << value << '\'';
-            p << p.charLiteral << ss.str();
-        }
-
     protected:
         void accept(ASTVisitor * v) override;
-
     };
+
+
+
 
     class ASTString : public AST {
     public:
         std::string value;
-
+    public:
         ASTString(Token const & t):
             AST{t} {
             std::string const & s{t.valueString()};
@@ -149,16 +122,12 @@ namespace tinycplus {
                 throw ParserError(STR("Expected string (double quote), but character '" << s << "' (single quote) found"), t.location(), false);
             value = s;
         }
-
-
-        void print(ASTPrettyPrinter & p) const override {
-            p << p.stringLiteral << value;
-        }
-
     protected:
         void accept(ASTVisitor * v) override;
-
     };
+
+
+
 
     class ASTIdentifier : public AST {
     public:
@@ -168,22 +137,18 @@ namespace tinycplus {
             AST{t},
             name{t.valueSymbol()} {
         }
-
+    public:
         /** An identifier in read position is a variable read and all variables have addresses.
          */
         bool hasAddress() const override {
             return true;
         }
-
-
-        void print(ASTPrettyPrinter & p) const override {
-            p << p.identifier << name.name();
-        }
-
     protected:
         void accept(ASTVisitor * v) override;
-
     };
+
+
+
 
     /** Base class for all types.
      */
@@ -194,125 +159,102 @@ namespace tinycplus {
             buildStringRepresentation(ss);
             return ss.str();
         }
-
     protected:
         ASTType(Token const & t):
             AST{t} {
         }
-
     protected:
         virtual void buildStringRepresentation(std::ostream & s) const = 0;
-
         // friendship is not inherited, but methods are
         void toString(ASTType const * type, std::ostream & s) const {
             type->buildStringRepresentation(s);
         }
-
         void accept(ASTVisitor * v) override;
-
     };
+
+
+
 
     class ASTPointerType : public ASTType {
     public:
         std::unique_ptr<ASTType> base;
-
+    public:
         ASTPointerType(Token const & t, std::unique_ptr<ASTType> base):
             ASTType{t},
             base{std::move(base)} {
         }
-
-        void print(ASTPrettyPrinter & p) const override {
-            p << (*base) << p.symbol << "*";
-        }
-
     protected:
         void buildStringRepresentation(std::ostream & s) const override {
             toString(base.get(), s);
             s << "*";
         };
-
         void accept(ASTVisitor * v) override;
-
     };
+
+
+
 
     class ASTArrayType : public ASTType {
     public:
         std::unique_ptr<ASTType> base;
         std::unique_ptr<AST> size;
-
+    public:
         ASTArrayType(Token const & t, std::unique_ptr<ASTType> base, std::unique_ptr<AST> size):
             ASTType{t},
             base{std::move(base)},
             size{std::move(size)} {
         }
-
-        void print(ASTPrettyPrinter & p) const override {
-            p << (*base) << p.symbol << "[" << *size << p.symbol << "]";
-        }
-
     protected:
         void buildStringRepresentation(std::ostream & s) const override {
             toString(base.get(), s);
             s << "[]";
         };
-
         void accept(ASTVisitor * v) override;
-
     };
+
+
+
 
     class ASTNamedType : public ASTType {
     public:
         Symbol name;
-
+    public:
         ASTNamedType(Token const & t) :
             ASTType{t},
             name{t.valueSymbol()} {
         }
-
-        void print(ASTPrettyPrinter & p) const override {
-            p << p.type << name.name();
-        }
-
     protected:
         void buildStringRepresentation(std::ostream & s) const override {
             s << name.name();
         };
-
         void accept(ASTVisitor * v) override;
-
     };
+
+
+
 
     // comma separated, single line
     class ASTSequence : public AST {
     public:
         std::vector<std::unique_ptr<AST>> body;
-
+    public:
         ASTSequence(Token const & t):
             AST{t} {
         }
-
+    public:
         /** The result of sequence has address if its last element has address as the last element is what is returned.
          */
         bool hasAddress() const override {
-            if (body.empty())
-                return false;
-            return body.back()->hasAddress();
+            return body.empty()
+                ? false
+                : body.back()->hasAddress();
         }
-
-
-        void print(ASTPrettyPrinter & p) const override {
-            auto i = body.begin();
-            if (i != body.end()) {
-                p << **i;
-                while (++i != body.end())
-                    p << p.symbol << ", " << **i;
-            }
-        }
-
     protected:
         void accept(ASTVisitor * v) override;
-
     };
+
+
+
 
     // new line separated with {}
     class ASTBlock : public ASTSequence {
@@ -320,47 +262,39 @@ namespace tinycplus {
         ASTBlock(Token const & t):
             ASTSequence{t} {
         }
-
-        void print(ASTPrettyPrinter & p) const override {
-            p << p.symbol << "{";
-            p.indent();
-            for (auto & i : body) {
-                p.newline();
-                p << *i;
-            }
-            p.dedent();
-            p.newline();
-            p << p.symbol << "}";
-            p.newline();
-        }
-
     protected:
         void accept(ASTVisitor * v) override;
-
     };
+
+
+
+
+    class ASTProgram : public ASTSequence {
+    public:
+        ASTProgram(Token const & t): ASTSequence{t} { }
+    protected:
+        void accept(ASTVisitor * v) override;
+    };
+
+
+
 
     class ASTVarDecl : public AST {
     public:
         std::unique_ptr<ASTType> type;
         std::unique_ptr<ASTIdentifier> name;
         std::unique_ptr<AST> value;
-
+    public:
         ASTVarDecl(Token const & t, std::unique_ptr<ASTType> type):
             AST{t},
             type{std::move(type)} {
         }
-
-        void print(ASTPrettyPrinter & p) const override {
-            p << (*type) << " " << (*name);
-            if (value.get() != nullptr) {
-                p << p.symbol << " = " << (*value);
-            }
-        }
-
     protected:
         void accept(ASTVisitor * v) override;
-
     };
+
+
+
 
     class ASTFunPtrDecl : public AST {
     public:
@@ -373,22 +307,28 @@ namespace tinycplus {
             name{std::move(name)},
             returnType{std::move(returnType)} {
         }
-    public:
-        void print(ASTPrettyPrinter & p) const override {
-            p << p.keyword << "typedef " << (*returnType) << p.symbol << "( *" << (*name) << p.symbol << ")(";
-            auto i = args.begin();
-            if (i != args.end()) {
-                p << **i;
-                while (++i != args.end())
-                    p << p.symbol << ", " << **i;
-            }
-            p << p.symbol << ")";
-        }
     protected:
         void accept(ASTVisitor * v) override;
     };
 
-    class ASTFunDecl : public AST {
+
+
+
+    class ASTPartialDecl : public AST {
+    public:
+        /**
+         * false -> is declaration only
+         * true -> is declartion with definition
+        **/
+        bool isDefinition = false;
+    public:
+        ASTPartialDecl(Token const & t): AST{t} { }
+    };
+
+
+
+
+    class ASTFunDecl : public ASTPartialDecl {
     public:
         std::unique_ptr<ASTType> typeDecl;
         Symbol name;
@@ -396,55 +336,31 @@ namespace tinycplus {
         std::unique_ptr<AST> body;
     public:
         ASTFunDecl(Token const & t, std::unique_ptr<ASTType> type):
-            AST{t},
+            ASTPartialDecl{t},
             typeDecl{std::move(type)},
             name{t.valueSymbol()} {
-        }
-    public:
-        void print(ASTPrettyPrinter & p) const override {
-            p << (*typeDecl) << " " << p.identifier << name.name() << p.symbol << "(";
-            auto arg = args.begin();
-            if (arg != args.end()) {
-                p << *arg[0];
-                while (++arg != args.end())
-                    p << p.symbol << ", " << *arg[0];
-            }
-            p << p.symbol << ")" << (*body);
         }
     protected:
         void accept(ASTVisitor * v) override;
     };
 
-    class ASTStructDecl : public AST {
+
+
+
+    class ASTStructDecl : public ASTPartialDecl {
     public:
         Symbol name;
         std::vector<std::unique_ptr<ASTVarDecl>> fields;
-        /** If true the struct has also field definitions. Extra flag is necessary because empty fields can also mean an empty struct.
-         */
-        bool isDefinition = false;
     public:
         ASTStructDecl(Token const & t, Symbol name):
-            AST{t},
+            ASTPartialDecl{t},
             name{name} {
-        }
-    public:
-        void print(ASTPrettyPrinter & p) const override {
-            p << p.keyword << "struct " << p.identifier << name.name();
-            if (isDefinition) {
-                p << p.symbol << "{";
-                p.indent();
-                for (auto & i : fields) {
-                    p.newline();
-                    i->print(p);
-                }
-                p.dedent();
-                p.newline();
-                p << p.symbol << "}";
-            }
         }
     protected:
         void accept(ASTVisitor * v) override;
     };
+
+
 
 
     class ASTMethodDecl : public ASTFunDecl {
@@ -460,173 +376,117 @@ namespace tinycplus {
         ASTMethodDecl(Token const & t, std::unique_ptr<ASTType> type)
             :ASTFunDecl{t, std::move(type)}
             ,virtuality{Virtuality::None}
-        { }
+        {
+            isDefinition = true; // methods must always have a body
+        }
     public:
         bool isAbstract() const { return virtuality == Virtuality::Abstract; }
         bool isVirtual() const { return virtuality == Virtuality::Virtual; }
         bool isOverride() const { return virtuality == Virtuality::Override; }
         bool isVirtualized() const { return isVirtual() || isOverride() || isAbstract(); }
-
-        void print(ASTPrettyPrinter & p) const override {
-            p << (*typeDecl) << " " << p.identifier << name.name() << p.symbol << "(";
-            auto arg = args.begin();
-            if (arg != args.end()) {
-                p << *arg[0];
-                while (++arg != args.end()) {
-                    p << p.symbol << ", " << *arg[0];
-                }
-            }
-            p << p.symbol << ")";
-            switch (virtuality) {
-            case Virtuality::Virtual:
-                p << p.keyword << " " << symbols::KwVirtual.name() << " ";
-                break;
-            case Virtuality::Override:
-                p << p.keyword << " " << symbols::KwOverride.name() << " ";
-                break;
-            case Virtuality::Abstract:
-                p << p.keyword << " " << symbols::KwAbstract.name() << " ";
-            }
-            p << (*body);
-        }
     protected:
         void accept(ASTVisitor * v) override;
     };
 
 
-    class ASTClassDecl : public AST {
+
+
+    class ASTInterfaceDecl : public ASTPartialDecl {
+    public:
+        Symbol name;
+        std::vector<std::unique_ptr<ASTMethodDecl>> methods;
+    public:
+        ASTInterfaceDecl(Token const & t, Symbol name):
+            ASTPartialDecl{t},
+            name{name}
+        { }
+    protected:
+        void accept(ASTVisitor * v) override;
+    };
+
+
+
+
+    class ASTClassDecl : public ASTPartialDecl {
     public:
         Symbol name;
         std::unique_ptr<ASTType> baseClass;
         std::vector<std::unique_ptr<ASTVarDecl>> fields;
         std::vector<std::unique_ptr<ASTMethodDecl>> methods;
-
-        /** If true the struct has also field definitions. Extra flag is necessary because empty fields can also mean an empty struct.
-         */
-        bool isDefinition = false;
-
     public:
         ASTClassDecl(Token const & t, Symbol name):
-            AST{t},
+            ASTPartialDecl{t},
             name{name} {
         }
-
-    public:
-        void print(ASTPrettyPrinter & p) const override {
-            p << p.keyword << "class " << p.identifier << name.name();
-            if (isDefinition) {
-                p << p.symbol << "{";
-                p.indent();
-                for (auto & i : fields) {
-                    p.newline();
-                    i->print(p);
-                }
-                for (auto & i : methods) {
-                    p.newline();
-                    i->print(p);
-                }
-                p.dedent();
-                p.newline();
-                p << p.symbol << "}";
-            }
-        }
-
     protected:
         void accept(ASTVisitor * v) override;
 
     }; // class ASTClassDecl
+
+
+
 
     class ASTIf : public AST {
     public:
         std::unique_ptr<AST> cond;
         std::unique_ptr<AST> trueCase;
         std::unique_ptr<AST> falseCase;
-
+    public:
         ASTIf(Token const & t):
             AST{t} {
         }
-
-
-        void print(ASTPrettyPrinter & p) const override {
-            p << p.keyword << "if " << p.symbol << "(" << *cond << p.symbol << ")" << *trueCase;
-            if (falseCase.get() != nullptr)
-                p << p.keyword << "else" << *falseCase;
-        }
-
     protected:
         void accept(ASTVisitor * v) override;
-
     };
+
+
+
 
     class ASTSwitch : public AST {
     public:
         std::unique_ptr<AST> cond;
         std::unique_ptr<AST> defaultCase;
         std::unordered_map<int, std::unique_ptr<AST>> cases;
-
+    public:
         ASTSwitch(Token const & t):
             AST{t} {
         }
-
-
-        void print(ASTPrettyPrinter & p) const override {
-            p << p.keyword << "switch " << p.symbol << "(" << *cond << p.symbol << ") {";
-            p.indent();
-            for (auto & i : cases) {
-                p.newline();
-                p << p.keyword << "case " << p.numberLiteral << i.first << p.symbol << ":" << *i.second;
-            }
-            if (defaultCase.get() != nullptr) {
-                p.newline();
-                p << p.keyword << "default" << p.symbol << ":" << *defaultCase;
-            }
-            p.dedent();
-            p.newline();
-            p << p.symbol << "}";
-        }
-
     protected:
         void accept(ASTVisitor * v) override;
-
     };
+
+
+
 
     class ASTWhile : public AST {
     public:
         std::unique_ptr<AST> cond;
         std::unique_ptr<AST> body;
-
+    public:
         ASTWhile(Token const & t):
             AST{t} {
         }
-
-
-        void print(ASTPrettyPrinter & p) const override {
-            p << p.keyword << "while " << p.symbol << "(" << *cond << p.symbol << ")" << *body;
-        }
-
     protected:
         void accept(ASTVisitor * v) override;
-
     };
+
+
+
 
     class ASTDoWhile : public AST {
     public:
         std::unique_ptr<AST> body;
         std::unique_ptr<AST> cond;
-
+    public:
         ASTDoWhile(Token const & t):
             AST{t} {
         }
-
-
-        void print(ASTPrettyPrinter & p) const override {
-            p << p.keyword << "do" << *body << p.keyword << "while " << p.symbol << "(" << *cond << p.symbol << ")";
-        }
-
     protected:
         void accept(ASTVisitor * v) override;
-
     };
+
+
+
 
     class ASTFor : public AST {
     public:
@@ -634,162 +494,123 @@ namespace tinycplus {
         std::unique_ptr<AST> cond;
         std::unique_ptr<AST> increment;
         std::unique_ptr<AST> body;
-
+    public:
         ASTFor(Token const & t):
             AST{t} {
         }
-
-
-        void print(ASTPrettyPrinter & p) const override {
-            p << p.keyword << "for " << p.symbol << "(";
-            if (init.get() != nullptr)
-                p << *init;
-            p << p.symbol << ";";
-            if (cond.get() != nullptr)
-                p << *cond;
-            p << p.symbol << ";";
-            if (increment.get() != nullptr)
-                p << *increment;
-            p << p.symbol << ")";
-            p << *body;
-        }
-
     protected:
         void accept(ASTVisitor * v) override;
-
     };
+
+
+
 
     class ASTBreak : public AST {
     public:
         ASTBreak(Token const & t):
             AST{t} {
         }
-
-
-        void print(ASTPrettyPrinter & p) const override {
-            p << p.keyword << "break";
-        }
-
     protected:
         void accept(ASTVisitor * v) override;
-
     };
+
+
+
 
     class ASTContinue : public AST {
     public:
         ASTContinue(Token const & t):
             AST{t} {
         }
-
-
-        void print(ASTPrettyPrinter & p) const override {
-            p << p.keyword << "continue";
-        }
-
     protected:
         void accept(ASTVisitor * v) override;
-
     };
+
+
+
 
     class ASTReturn : public AST {
     public:
         std::unique_ptr<AST> value;
+    public:
         ASTReturn(Token const & t):
             AST{t} {
         }
-
-
-        void print(ASTPrettyPrinter & p) const override {
-            p << p.keyword << "return";
-            if (value.get() != nullptr)
-                p << " " << *value;
-        }
-
     protected:
         void accept(ASTVisitor * v) override;
-
     };
+
+
+
 
     class ASTBinaryOp : public AST {
     public:
         Symbol op;
         std::unique_ptr<AST> left;
         std::unique_ptr<AST> right;
-
+    public:
         ASTBinaryOp(Token const & t, std::unique_ptr<AST> left, std::unique_ptr<AST> right):
             AST{t},
             op{t.valueSymbol()},
             left{std::move(left)},
             right{std::move(right)} {
         }
-
+    public:
         /** Whether a result of binary operator has an address depends on the operation and operands.
          */
         bool hasAddress() const override;
-
-
-        void print(ASTPrettyPrinter & p) const override {
-            p << *left << " " << p.symbol << op.name() << " " << *right;
-        }
-
     protected:
         void accept(ASTVisitor * v) override;
-
     };
+
+
+
 
     class ASTAssignment : public AST {
     public:
         Symbol op;
         std::unique_ptr<AST> lvalue;
         std::unique_ptr<AST> value;
-
+    public:
         ASTAssignment(Token const & t, std::unique_ptr<AST> lvalue, std::unique_ptr<AST> value):
             AST{t},
             op{t.valueSymbol()},
             lvalue{std::move(lvalue)},
             value{std::move(value)} {
         }
-
+    public:
         /** Assignment result always has address of the lvalue it assigns to.
          */
         bool hasAddress() const override {
             return true;
         }
-
-
-        void print(ASTPrettyPrinter & p) const override {
-            p << *lvalue << " " << p.symbol << op.name() << " " << *value;
-        }
-
     protected:
         void accept(ASTVisitor * v) override;
-
     };
+
+
+
 
     class ASTUnaryOp : public AST {
     public:
         Symbol op;
         std::unique_ptr<AST> arg;
-
+    public:
         ASTUnaryOp(Token const & t, std::unique_ptr<AST> arg):
             AST{t},
             op{t.valueSymbol()},
             arg{std::move(arg)} {
         }
-
+    public:
         /** Whether a result of unary operator has an address depends on the operation and operands.
          */
         bool hasAddress() const override;
-
-
-        void print(ASTPrettyPrinter & p) const override {
-            p << p.symbol << op.name() << *arg;
-        }
-
     protected:
         void accept(ASTVisitor * v) override;
-
     };
+
+
+
 
     /** Post-increment and post-decrement.
      */
@@ -797,186 +618,151 @@ namespace tinycplus {
     public:
         Symbol op;
         std::unique_ptr<AST> arg;
-
+    public:
         ASTUnaryPostOp(Token const & t, std::unique_ptr<AST> arg):
             AST{t},
             op{t.valueSymbol()},
             arg{std::move(arg)} {
         }
-
+    public:
         /** As the result of post-increment or decrement is the previous value, it is now a temporary and therefore does not have an address.
             NOTE: The default behavior is identical, but this method is included for clarity.
          */
         bool hasAddress() const override {
             return false;
         }
-
-
-        void print(ASTPrettyPrinter & p) const override {
-            p << *arg << p.symbol << op.name();
-        }
-
     protected:
         void accept(ASTVisitor * v) override;
-
     };
+
+
+
 
     class ASTAddress : public AST {
     public:
         std::unique_ptr<AST> target;
-
+    public:
         ASTAddress(Token const & t, std::unique_ptr<AST> target):
             AST{t},
             target{std::move(target)} {
         }
-
-
-        void print(ASTPrettyPrinter & p) const override {
-            p << p.symbol << "&" << *target;
-        }
-
     protected:
         void accept(ASTVisitor * v) override;
-
     };
+
+
+
 
     class ASTDeref : public AST {
     public:
         std::unique_ptr<AST> target;
-
+    public:
         ASTDeref(Token const & t, std::unique_ptr<AST> target):
             AST{t},
             target{std::move(target)} {
         }
-
+    public:
         /** The dereferenced item always has address as it was obtained by following a pointer in the first place.
          */
         bool hasAddress() const override {
             return true;
         }
-
-
-        void print(ASTPrettyPrinter & p) const override {
-            p << p.symbol << "*" << *target;
-        }
-
     protected:
         void accept(ASTVisitor * v) override;
-
     };
+
+
+
 
     class ASTIndex : public AST {
     public:
         std::unique_ptr<AST> base;
         std::unique_ptr<AST> index;
-
+    public:
         ASTIndex(Token const & t, std::unique_ptr<AST> base, std::unique_ptr<AST> index):
             AST{t},
             base{std::move(base)},
             index{std::move(index)} {
         }
-
+    public:
         /** If the base has address, then its element must have address too.
          */
         bool hasAddress() const override {
             return base->hasAddress();
         }
-
-
-        void print(ASTPrettyPrinter & p) const override {
-            p << *base << p.symbol << "[" << *index << p.symbol << "]";
-        }
-
     protected:
         void accept(ASTVisitor * v) override;
-
     };
+
+
+
 
     class ASTMember : public AST {
     public:
         const Symbol op;
         std::unique_ptr<AST> base;
         std::unique_ptr<AST> member;
-
+    public:
         ASTMember(Token const & t, std::unique_ptr<AST> base, std::unique_ptr<AST> member):
             AST{t},
             op{t.valueSymbol()},
             base{std::move(base)},
             member{std::move(member)} {
         }
-
+    public:
         /** If the base has address, then its element must have address too.
          */
         bool hasAddress() const override {
             return base->hasAddress();
         }
-
-        void print(ASTPrettyPrinter & p) const override {
-            p << *base << p.symbol << op.name() << p.identifier << *member;
-        }
-
     protected:
         void accept(ASTVisitor * v) override;
-
     };
+
+
+
 
     class ASTCall : public AST {
     public:
         std::unique_ptr<AST> function;
         std::vector<std::unique_ptr<AST>> args;
-
+    public:
         ASTCall(Token const & t, std::unique_ptr<AST> function):
             AST{t},
             function{std::move(function)} {
         }
-
-
-        void print(ASTPrettyPrinter & p) const override {
-            p << *function << p.symbol << "(";
-            auto i = args.begin();
-            if (i != args.end()) {
-                p << **i;
-                while (++i != args.end())
-                    p << p.symbol << **i;
-            }
-            p << p.symbol << ")";
-        }
-
     protected:
         void accept(ASTVisitor * v) override;
-
     };
+
+
+
 
     class ASTCast : public AST {
     public:
         std::unique_ptr<AST> value;
         std::unique_ptr<ASTType> type;
-
+    public:
         ASTCast(Token const & t, std::unique_ptr<AST> value, std::unique_ptr<ASTType> type):
             AST{t},
             value{std::move(value)},
             type{std::move(type)} {
         }
-
+    public:
         /** Casts can only appear on right hand side of assignments.
          */
         bool hasAddress() const override {
             return false;
         }
-
-
-        void print(ASTPrettyPrinter & p) const override {
-            p << p.keyword << "cast" << p.symbol << "<" << (*type) << p.symbol << ">(" << *value << p.symbol << ")";
-        }
-
     protected:
         void accept(ASTVisitor * v) override;
-
     };
+
+
+
 
     class ASTVisitor {
     public:
-
         virtual void visit(AST * ast) = 0;
         virtual void visit(ASTInteger * ast) = 0;
         virtual void visit(ASTDouble * ast) = 0;
@@ -989,10 +775,12 @@ namespace tinycplus {
         virtual void visit(ASTNamedType * ast) = 0;
         virtual void visit(ASTSequence * ast) = 0;
         virtual void visit(ASTBlock * ast) = 0;
+        virtual void visit(ASTProgram * ast) = 0;
         virtual void visit(ASTVarDecl * ast) = 0;
         virtual void visit(ASTFunDecl * ast) = 0;
         virtual void visit(ASTFunPtrDecl * ast) = 0;
         virtual void visit(ASTStructDecl * ast) = 0;
+        virtual void visit(ASTInterfaceDecl * ast) = 0;
         virtual void visit(ASTClassDecl * ast) = 0;
         virtual void visit(ASTMethodDecl * ast) = 0;
         virtual void visit(ASTIf * ast) = 0;
@@ -1013,13 +801,10 @@ namespace tinycplus {
         virtual void visit(ASTMember * ast) = 0;
         virtual void visit(ASTCall * ast) = 0;
         virtual void visit(ASTCast * ast) = 0;
-
     protected:
-
         void visitChild(AST * child) {
             child->accept(this);
         }
-
     }; // tinycplus::ASTVisitor
 
     inline void AST::accept(ASTVisitor * v) { v->visit(this); }
@@ -1034,10 +819,12 @@ namespace tinycplus {
     inline void ASTNamedType::accept(ASTVisitor * v) { v->visit(this); }
     inline void ASTSequence::accept(ASTVisitor * v) { v->visit(this); }
     inline void ASTBlock::accept(ASTVisitor * v) { v->visit(this); }
+    inline void ASTProgram::accept(ASTVisitor * v) { v->visit(this); }
     inline void ASTVarDecl::accept(ASTVisitor * v) { v->visit(this); }
     inline void ASTFunDecl::accept(ASTVisitor * v) { v->visit(this); }
     inline void ASTFunPtrDecl::accept(ASTVisitor * v) { v->visit(this); }
     inline void ASTStructDecl::accept(ASTVisitor * v) { v->visit(this); }
+    inline void ASTInterfaceDecl::accept(ASTVisitor * v) { v->visit(this); }
     inline void ASTClassDecl::accept(ASTVisitor * v) { v->visit(this); }
     inline void ASTMethodDecl::accept(ASTVisitor * v) { v->visit(this); }
     inline void ASTIf::accept(ASTVisitor * v) { v->visit(this); }

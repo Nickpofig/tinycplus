@@ -21,12 +21,11 @@ namespace tinycplus {
         class Function;
         class Complex;
         class Struct;
+        class Interface;
         class Class;
         class VTable;
-
     public:
         virtual ~Type() = default;
-
     public:
         /** Converts the type to a printable string.
          */
@@ -35,58 +34,53 @@ namespace tinycplus {
             toStream(ss);
             return ss.str();
         }
-
         /** Determines if the type is fully defined.
             A fully defined type can be instantiated. In general all types with the exception of forward declared structures are fully defined.
          */
         virtual bool isFullyDefined() const {
             return true;
         }
-
         virtual bool isPointer() const {
             return false;
         }
-
-        template<typename T>
-        T * getCore();
-
-        template<typename T>
-        T * as() {
+    public: // helpers
+        template<typename T> T * getCore();
+        template<typename T> T * as() {
             return dynamic_cast<T*>(this);
         }
-
     private:
         virtual void toStream(std::ostream & s) const = 0;
     }; // tinycplus::Type
 
 
+
+
     /** A type alias, i.e. a different name for same type.
      */
     class Type::Alias : public Type {
+    private:
+        Symbol name_;
+        Type * base_;
     public:
         Alias(Symbol name, Type * base):
             name_{name},
             base_{base} {
         }
-
+    public:
         bool isFullyDefined() const override {
             return base_->isFullyDefined();
         }
-
         Type * base() const {
             return base_;
         }
-
     private:
-
         void toStream(std::ostream & s) const override {
             s << name_.name();
         }
-
-        Symbol name_;
-        Type * base_;
-
     }; // tinycplus::Type::Alias
+
+
+
 
     /** Plain old data type declaration.
         These are created automatically by the backend for the primitive types supported by the language. In the case of tinyC, these are:
@@ -97,19 +91,17 @@ namespace tinycplus {
      */
     class Type::POD : public Type {
     public:
-
         POD(Symbol name):
             name_{name} {
         }
-
     private:
-
         void toStream(std::ostream & s) const override {
             s << name_.name();
         }
-
         Symbol name_;
     }; // tinycplus::Type::POD
+
+
 
 
     /** Pointer to a type. 
@@ -119,24 +111,21 @@ namespace tinycplus {
         Pointer(Type * base):
             base_{base} {
         }
-
         Type * base() const {
             return base_;
         }
-
         bool isPointer() const override {
             return true;
         }
-
     private:
-
         void toStream(std::ostream & s) const override {
             base_->toStream(s);
             s << "*";
         }
-
         Type * base_;
     };
+
+
 
 
     /** Function type declaration.
@@ -186,6 +175,9 @@ namespace tinycplus {
         }
     }; // tinycplus::Type::Function
 
+
+
+
     class FieldInfo {
     public:
         Symbol name;
@@ -206,7 +198,11 @@ namespace tinycplus {
         Symbol fullName;
         Type::Function * type;
         ASTMethodDecl * ast;
+        bool isInterfaceMethod;
     };
+
+
+
 
     /** Complex declaration.
      * 
@@ -290,59 +286,78 @@ namespace tinycplus {
                 other->fieldsOrder_.push_back(name);
             }
         }
-
-        /// TODO: remove this
-        // void copyMembersTo(Type::Complex * other) {
-        //     for (auto & name : fieldsOrder_) {
-        //         other->fields_.insert({name, fields_[name]});
-        //         other->fieldsOrder_.push_back(name);
-        //     }
-        // }
     }; // tinycplus::Type::Complex
 
-    /** Structure declaration.
-     * 
-        Keeps a mapping from the fields to their types and the AST where the type was declared.
-     */
+
+
+
     class Type::Struct : public Type::Complex {
     public:
-        ASTStructDecl * ast() const {
-            return ast_;
-        }
-
-        /** Struct type is fully defined if its ast the definition, not just forward declaration of the type.
-         */
-        bool isFullyDefined() const override {
-            return ast_ != nullptr && ast_->isDefinition;
-        }
-
-        void updateDefinition(ASTStructDecl * ast) {
-            assert(ast_ == nullptr || ! ast_->isDefinition);
-            ast_ = ast;
-        }
-
+        Symbol name;
+    public:
+        Struct(Symbol name): name{name} { }
     private:
         friend class TypeChecker;
-
         void toStream(std::ostream & s) const override {
-            s << ast_->name.name();
+            s << name.name();
         }
-
-        ASTStructDecl * ast_;
     }; // tinycplus::Type::Struct
+
+
+
+
+    /** Represents TinyC+ interfaces
+     * 
+     */
+    class Type::Interface : public Type::Complex {
+    private:
+        int id_;
+        Symbol name_;
+        std::optional<Symbol> globalInstanceName_;
+    public:
+        Interface(Symbol name): name_{name} {
+            static int id = 0;
+            id_ = id;
+            id++;
+        }
+    public:
+        Symbol & getName() {
+            return name_;
+        }
+        Symbol & getGlobalInstanceName() {
+            if (!globalInstanceName_.has_value()) {
+                globalInstanceName_ = symbols::startLanguageName().add(name_).add("instance").end();
+            }
+            return globalInstanceName_.value();
+        }
+    private:
+        friend class TypeChecker;
+        void toStream(std::ostream & s) const override {
+            s << name_.name();
+        }
+    }; // tinycplus::Type::Interface
+
+
 
 
     class Type::VTable : public Type::Complex {
     private:
         Symbol name_;
+        std::optional<Symbol> globalInstanceName_;
     public:
-        VTable(Symbol name): name_{name} { }
+        VTable(Symbol name):
+            name_{name}
+        { }
     public:
         Symbol getGlobalInstanceName() {
-            return Symbol{STR(name_.name() << "instance__")};
+            if (!globalInstanceName_.has_value()) {
+                globalInstanceName_ = symbols::startLanguageName().add(name_).add("instance").end();
+            }
+            return globalInstanceName_.value();
         }
+
         Symbol getGlobalInitFunctionName() {
-            return Symbol{STR(name_.name() << "init__")};
+            return symbols::startLanguageName().add(name_).add("init").end();
         }
 
         bool requiresImplicitConstruction() const override {
@@ -363,58 +378,44 @@ namespace tinycplus {
         void toStream(std::ostream & s) const override {
             s << name_.name();
         }
-    };
+    }; // tinycplus::Type::VTable
 
-    /** Structure declaration.
-     * 
-        Keeps a mapping from the fields and methods to their types and the AST where the type was declared.
-     */
+
+
+
     class Type::Class : public Type::Complex {
+    public:
+        Symbol name;
     private:
-        ASTClassDecl * ast_ = nullptr;
+        int id_;
         Type::Class * base_ = nullptr;
         Type::VTable * vtable_ = nullptr;
         std::unordered_map<Symbol, MethodInfo> methods_;
+        std::unordered_map<Symbol, Type::Interface * > interfaces_;
         bool isAbstract_ = false;
     public:
-        Class(Type::VTable * vtable):
-            vtable_{vtable} {
+        Class(Symbol name, Type::VTable * vtable): name{name}, vtable_{vtable} {
+            static int id = 0;
+            id_ = id;
+            id++;
         }
     public:
-        Symbol getName() const {
-            return ast_->name;
-        }
-
-        ASTClassDecl * ast() const {
-            return ast_;
-        }
-
         Type::Class * getBase() const {
             return base_;
         }
-
         void setBase(Type::Class * type) {
-            if (!type->isFullyDefined()) throw ParserError{
-                STR("[T2] A base type must be fully defined before inherited."),
-                ast_->location()
-            };
             base_ = type;
             base_->getVirtualTable()->copyFieldsTo(vtable_);
         }
-
+        void implements(Type::Interface * type) {
+            interfaces_.insert_or_assign(type->getName(), type);
+        }
         Type::VTable * getVirtualTable() const {
             return vtable_;
         }
-
-        void updateDefinition(ASTClassDecl * ast) {
-            assert(ast_ == nullptr || ! ast_->isDefinition);
-            ast_ = ast;
-        }
-
         bool hasOwnVirtualTable() {
             return vtable_ != nullptr && (base_ == nullptr || base_->vtable_ != vtable_);
         }
-
         bool hasMethod(Symbol name, bool includeBaseInSearch) const {
             for (auto & method : methods_) {
                 if (method.first == name) {
@@ -426,7 +427,14 @@ namespace tinycplus {
             }
             return false;
         }
-
+        bool isInterfaceMethod(Symbol name) {
+            for (auto & it : interfaces_) {
+                if (it.second->getFieldInfo(name).has_value()) {
+                    return true;
+                }
+            }
+            return false;
+        }
         std::optional<MethodInfo> getMethodInfo(Symbol name, bool searchInBase = true) const {
             for (auto & method : methods_) {
                 if (method.first == name) {
@@ -442,12 +450,10 @@ namespace tinycplus {
             //     ast_->location()
             // };
         }
-
         bool isAbstract() const {
             return isAbstract_;
         }
-
-        void registerMethod(Symbol name, Type::Function * type, ASTMethodDecl * ast) {
+        void registerMethod(Symbol name, Type::Function * type, ASTMethodDecl * ast, bool isInterfaceMethod) {
             this->isAbstract_ |= ast->isAbstract();
             if (hasMethod(name, false)) {
                 throwMemberIsAlreadyDefined(name, ast);
@@ -468,16 +474,19 @@ namespace tinycplus {
                 .add(isVirtual ? "__virtual__" : "__")
                 .add(name)
                 .end();
-            methods_.insert({ name, MethodInfo{name, fullName, type, ast} });
+            methods_.insert({ name, MethodInfo{name, fullName, type, ast, isInterfaceMethod} });
         }
-
+        void addInterfaceType(Type::Interface * interfaceType) {
+            interfaces_[interfaceType->getName()] = interfaceType;
+        }
+        Type::Interface * getInterfaceType(Symbol & name) {
+            auto it = interfaces_.find(name);
+            if (it == interfaces_.end()) {
+                throw std::runtime_error("[ERROR:Types] ");
+            }
+            return it->second;
+        }
     public: // overrides
-        /** Struct type is fully defined if its ast the definition, not just forward declaration of the type.
-         */
-        bool isFullyDefined() const override {
-            return ast_ != nullptr && ast_->isDefinition;
-        }
-
         bool requiresImplicitConstruction() const override {
             return true;
         }
@@ -517,9 +526,11 @@ namespace tinycplus {
     private:
         friend class TypeChecker;
         void toStream(std::ostream & s) const override {
-            s << ast_->name.name();
+            s << name.name();
         }
     }; // tinycplus::Type::Class
+
+
 
 
     template<typename T>
