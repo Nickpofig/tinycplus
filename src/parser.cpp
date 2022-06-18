@@ -8,22 +8,44 @@ namespace tinycplus {
         return false;
     }
 
-    std::unique_ptr<AST> Parser::FUN_OR_VAR_DECL(bool isForClass) {
+    AccessMod Parser::ACCESS_MOD() {
+        auto whatFirst = top();
+        if (condPop(symbols::KwAccessPublic)) {
+            return AccessMod::Public;
+        } else if (condPop(symbols::KwAccessPrivate)) {
+            return AccessMod::Private;
+        } else if (condPop(symbols::KwAccessProtected)) {
+            return AccessMod::Protected;
+        }
+        throw ParserError(STR("Expected access modifier, but " << whatFirst << " found"), whatFirst.location(), eof());
+    }
+
+    std::unique_ptr<AST> Parser::FUN_OR_VAR_DECL(std::optional<Symbol> className) {
         // it can be either function or variable declaration now,
         // we just do the dirty trick by first parsing the type and identifier
         // to determine whether we are dealing with a function or variable declaration,
         // then revert the parser and parse the proper nonterminal this time
         Position x = position();
+        AccessMod accessMod;
+        bool isForClass = className.has_value();
+        if (isForClass) {
+            accessMod = ACCESS_MOD();
+        }
         TYPE(true);
-        IDENT();
-        if (top() == Symbol::ParOpen) {
+        if (isForClass && top() == Symbol::ParOpen) { // check for class constructor
             revertTo(x);
-            return FUN_DECL(isForClass);
+            return FUN_DECL(FunctionKind::Constructor);
         } else {
-            revertTo(x);
-            auto varDecl = isForClass ? VAR_DECL() : VAR_DECLS();
-            pop(Symbol::Semicolon);
-            return varDecl;
+            IDENT();
+            if (top() == Symbol::ParOpen) { // check for function
+                revertTo(x);
+                return FUN_DECL(isForClass ? FunctionKind::Method : FunctionKind::None);
+            } else {
+                revertTo(x);
+                auto varDecl = isForClass ? VAR_DECL(isForClass) : VAR_DECLS();
+                pop(Symbol::Semicolon);
+                return varDecl;
+            }
         }
     }
 
@@ -42,24 +64,10 @@ namespace tinycplus {
             } else if (top() == Symbol::KwTypedef) {
                 result->body.push_back(FUNPTR_DECL());
             } else {
-                result->body.push_back(FUN_OR_VAR_DECL(false));
+                result->body.push_back(FUN_OR_VAR_DECL(std::nullopt));
             }
         }
         return result;
-    }
-
-
-    /* REPL := STATEMENT | PROGRAM
-        We again do the dirty trick of trying first statement and then a program:
-        */
-    std::unique_ptr<AST> Parser::REPL() {
-        Position x = position();
-        try {
-            return STATEMENT();
-        } catch (...) {
-        }
-        revertTo(x);
-        return PROGRAM();
     }
 
     /*
@@ -68,16 +76,27 @@ namespace tinycplus {
         FUN_DECL := FUN_HEAD [ BLOCK_STMT | ';' ]
         METHOD_DECL := FUN_HEAD [ [ 'virtual' | 'override' ] [ BLOCK_STMT | ';' ] | 'abstract' ';' ]
     */
-    std::unique_ptr<AST> Parser::FUN_DECL(bool isMethod) {
+    std::unique_ptr<AST> Parser::FUN_DECL(FunctionKind kind) {
+        auto accessMod = AccessMod::Public;
+        bool isForClass = kind != FunctionKind::None;
+        if (isForClass) {
+            accessMod = ACCESS_MOD();
+        }
+        auto token = top();
         std::unique_ptr<ASTType> type{TYPE_FUN_RET()};
         if (!isIdentifier(top())) {
             throw ParserError(STR("Expected identifier, but " << top() << " found"), top().location(), eof());
         }
-        auto name = pop();
-        auto * method = isMethod ? new ASTMethodDecl{name, std::move(type)} : nullptr;
-        std::unique_ptr<ASTFunDecl> result{
-            isMethod ? method : new ASTFunDecl{name, std::move(type)}
-        };
+        bool isConstructor = kind == FunctionKind::Constructor;
+        if (isConstructor) {
+        } else {
+            token = pop();
+        }
+        std::unique_ptr<ASTFunDecl> result{new ASTFunDecl{token, std::move(type)}};
+        result->kind = kind;
+        result->name = token.valueSymbol();
+        // if (!isConstructor) {
+        // }
         pop(Symbol::ParOpen);
         if (top() != Symbol::ParClose) {
             do {
@@ -93,27 +112,47 @@ namespace tinycplus {
             } while (condPop(Symbol::Comma));
         }
         pop(Symbol::ParClose);
-        // define method virtuality
-        bool isAbstract_ = false;
-        if (isMethod) {
+        if (kind == FunctionKind::Method) {
+            bool isAbstract_ = false;
+            // defines method virtuality
             if (condPop(symbols::KwVirtual)) {
-                method->virtuality = ASTMethodDecl::Virtuality::Virtual;
+                result->virtuality = ASTFunDecl::Virtuality::Virtual;
             } else if (condPop(symbols::KwOverride)) {
-                method->virtuality = ASTMethodDecl::Virtuality::Override;
+                result->virtuality = ASTFunDecl::Virtuality::Override;
             } else if (condPop(symbols::KwAbstract)) {
-                method->virtuality = ASTMethodDecl::Virtuality::Abstract;
+                result->virtuality = ASTFunDecl::Virtuality::Abstract;
             } else {
-                method->virtuality = ASTMethodDecl::Virtuality::None;
+                result->virtuality = ASTFunDecl::Virtuality::None;
+            }
+            if (!isAbstract_) {
+                result->body = BLOCK_STMT();
+            } else if (!condPop(Symbol::Semicolon)) {
+                throw ParserError {
+                    STR("Expected ';' but " << top() << " found. Remember that an abstract method cannot have a body."),
+                    top().location(), false
+                };
             }
         }
-        // if there is body, parse it, otherwise leave empty as it is just a declaration
-        if (top() == Symbol::CurlyOpen) {
-            if (isAbstract_) {
-                throw ParserError(STR("Abstract method can't have a body"), top().location(), false);
+        else if (isConstructor) {
+            if (condPop(Symbol::Colon)) { // inheriting constructor
+                result->base = ASTFunDecl::Base { TYPE(false) };
+                pop(Symbol::ParOpen);
+                if (top() != Symbol::ParClose) {
+                    do {
+                        result->base->args.push_back(IDENT());
+                    } while(condPop(Symbol::Comma));
+                }
+                pop(Symbol::ParClose);
             }
             result->body = BLOCK_STMT();
-        } else if (!condPop(Symbol::Semicolon)) {
-            throw ParserError(STR("Expected semicolon after method forward declartion"), top().location(), false);
+        }
+        else {
+            // if there is body, parse it, otherwise leave empty as it is just a declaration
+            if (top() == Symbol::CurlyOpen) {
+                result->body = BLOCK_STMT();
+            } else if (!condPop(Symbol::Semicolon)) {
+                throw ParserError(STR("Expected semicolon after method forward declartion"), top().location(), false);
+            }
         }
         return result;
     }
@@ -331,7 +370,7 @@ namespace tinycplus {
         addTypeName(decl->name);
         if (condPop(Symbol::CurlyOpen)) {
             while (! condPop(Symbol::CurlyClose)) {
-                decl->fields.push_back(VAR_DECL());
+                decl->fields.push_back(VAR_DECL(false));
                 pop(Symbol::Semicolon);
             }
             decl->isDefinition = true;
@@ -370,13 +409,14 @@ namespace tinycplus {
         if (condPop(Symbol::CurlyOpen)) {
             while (! condPop(Symbol::CurlyClose)) {
                 // parsing field and method
-                auto member = FUN_DECL(true);
-                if (auto * method = member->as<ASTMethodDecl>()) {
+                auto member = FUN_DECL(FunctionKind::Method);
+                if (auto * method = member->as<ASTFunDecl>()) {
+                    auto methodName = method->name.value().name();
                     if (method->body) throw ParserError {
-                        STR("Interface's method: " << method->name.name() << " must not have a body."),
-                        method->location(),
+                        STR("Interface's method: " << methodName << " must not have a body."),
+                        method->location(), eof()
                     };
-                    interfaceDecl->methods.push_back(std::unique_ptr<ASTMethodDecl>(method));
+                    interfaceDecl->methods.push_back(std::unique_ptr<ASTFunDecl>(method));
                 }
                 member.release();
             }
@@ -390,6 +430,7 @@ namespace tinycplus {
     std::unique_ptr<ASTClassDecl> Parser::CLASS_DECL() {
         auto const & start = pop(symbols::KwClass);
         auto className = pop(Token::Kind::Identifier).valueSymbol();
+        this->className = className;
         std::unique_ptr<ASTClassDecl> classDecl{new ASTClassDecl{start, className}};
         addTypeName(className);
         // Parses base class
@@ -402,17 +443,22 @@ namespace tinycplus {
             // std::unordered_set<ASTMethodDecl*> undefinedMethods {};
             while (! condPop(Symbol::CurlyClose)) {
                 // parsing field and method
-                auto member = FUN_OR_VAR_DECL(true);
+                auto member = FUN_OR_VAR_DECL(className);
                 if (auto * field = member->as<ASTVarDecl>()) {
                     classDecl->fields.push_back(std::unique_ptr<ASTVarDecl>(field));
-                } else if (auto * method = member->as<ASTMethodDecl>()) { // saving as method
-                    classDecl->methods.push_back(std::unique_ptr<ASTMethodDecl>(method));
-                    if (!method->body && !method->isAbstract()) {
-                        // undefinedMethods.insert(method);
-                        throw ParserError {
-                            STR("Method: " << method->name.name() << " was declared but its body was not defined"),
-                            method->location()
-                        };
+                } else if (auto * func = member->as<ASTFunDecl>()) {
+                    if (func->isConstructor()) { // saving as constructor
+                        classDecl->constructors.push_back(std::unique_ptr<ASTFunDecl>(func));
+                    } else {  // saving as method
+                        classDecl->methods.push_back(std::unique_ptr<ASTFunDecl>(func));
+                        if (!func->body && !func->isAbstract()) {
+                            // undefinedMethods.insert(method);
+                            auto methodName = func->name.value().name();
+                            throw ParserError {
+                                STR("Method: " << methodName << " was declared but its body was not defined"),
+                                func->location()
+                            };
+                        }
                     }
                 }
                 member.release();
@@ -422,6 +468,7 @@ namespace tinycplus {
             // }
         }
         pop(Symbol::Semicolon);
+        this->className = std::nullopt;
         return classDecl;
     }
 
@@ -445,10 +492,12 @@ namespace tinycplus {
 
     /* VAR_DECL := TYPE identifier [ '[' E9 ']' ] [ '=' EXPR ]
         */
-    std::unique_ptr<ASTVarDecl> Parser::VAR_DECL() {
+    std::unique_ptr<ASTVarDecl> Parser::VAR_DECL(bool isField) {
         Token const & start = top();
+        auto accessMod = isField ? ACCESS_MOD() : AccessMod::Public;
         std::unique_ptr<ASTVarDecl> decl{new ASTVarDecl{start, TYPE()}};
         decl->name = IDENT();
+        decl->accessMod = accessMod;
         if (condPop(Symbol::SquareOpen)) {
             std::unique_ptr<AST> index{E9()};
             pop(Symbol::SquareClose);
@@ -465,9 +514,9 @@ namespace tinycplus {
         */
     std::unique_ptr<AST> Parser::VAR_DECLS() {
         std::unique_ptr<ASTSequence> result{new ASTSequence{top()}};
-        result->body.push_back(VAR_DECL());
+        result->body.push_back(VAR_DECL(false));
         while (condPop(Symbol::Comma))
-            result->body.push_back(VAR_DECL());
+            result->body.push_back(VAR_DECL(false));
         return result;
     }
 
@@ -632,7 +681,18 @@ namespace tinycplus {
         E_POST := '++' | '--'
         */
     std::unique_ptr<AST> Parser::E_CALL_INDEX_MEMBER_POST() {
-        std::unique_ptr<AST> result{F()};
+        auto beforeCheck = position();
+        bool isConstructorCall = isIdentifier(top()) && isTypeName(top().valueSymbol());
+        if (isConstructorCall) {
+            TYPE();
+            isConstructorCall = condPop(Symbol::ParOpen);
+            revertTo(beforeCheck);
+            // throw ParserError {
+            //     STR("Seeking constructor call. Expected '(' but " << top() << " found"),
+            //     top().location()
+            // };
+        }
+        std::unique_ptr<AST> result{isConstructorCall ? TYPE() : F()};
         while (true) {
             if (top() == Symbol::ParOpen) {
                 auto call = E_CALL(result);

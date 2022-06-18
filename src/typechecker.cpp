@@ -128,100 +128,17 @@ namespace tinycplus {
         return ast->setType(t);
     }
 
+
+
+
     void TypeChecker::visit(ASTFunDecl * ast) {
-        // creates function type from ast
-        std::unique_ptr<Type::Function> ftype{new Type::Function{visitChild(ast->typeDecl)}};
-        checkTypeCompletion(ftype->returnType(), ast->typeDecl);
-        // adds argument types
-        for (auto & i : ast->args) {
-            auto * argType = visitChild(i->type);
-            checkTypeCompletion(argType, i);
-            ftype->addArgument(argType);
-        }
-        // registers function type
-        auto * t = types_.getOrCreateFunctionType(std::move(ftype));
-        try {
-            addVariable(ast, ast->name, t);
-        } catch(std::exception e) {
-            // do nothing
-        }
-        ast->setType(t);
-        // enters the context and add all arguments as local variables
-        if (ast->body) {
-            names_.enterFunctionScope(t->returnType());
-            {
-                for (auto & i : ast->args) {
-                    names_.addVariable(i->name->name, i->type->getType());
-                }
-                // typecheck the function body
-                auto * actualReturn = visitChild(ast->body);
-                checkReturnType(t, actualReturn, ast);
-            }
-            // leaves the function context
-            names_.leaveCurrentScope();
-        }
+        if (ast->isMethod()) processMethod(ast);
+        else if (ast->isConstructor()) processConstructor(ast);
+        else processFunction(ast);
     }
 
 
-    void TypeChecker::visit(ASTMethodDecl * ast) {
-        // creates function type
-        auto context = pop<Context::Complex>();
-        if (auto * classType = context->complexType->as<Type::Class>()) {
-            std::unique_ptr<Type::Function> ftype{new Type::Function{visitChild(ast->typeDecl)}};
-            checkTypeCompletion(ftype->returnType(), ast->typeDecl);
-            // adds argument types
-            auto methodName = ast->name;
-            bool isInterfaceMethod = classType->isInterfaceMethod(methodName);
-            auto * targetType = isInterfaceMethod
-                ? types_.getOrCreatePointerType(types_.getTypeVoid())
-                : types_.getOrCreatePointerType(classType);
-            ftype->addArgument(targetType);
-            for (auto & i : ast->args) {
-                auto * argType = visitChild(i->type);
-                checkTypeCompletion(argType, i->type);
-                ftype->addArgument(argType);
-            }
-            // registers function type
-            auto * functionType = types_.getOrCreateFunctionType(std::move(ftype));
-            ast->setType(functionType);
-            // registers self as member of the class
-            types_.addMethodToClass(ast, classType, isInterfaceMethod);
-            if (ast->body) {
-                // enters the context and add all arguments as local variables
-                names_.enterFunctionScope(functionType->returnType());
-                {
-                    names_.addVariable(symbols::KwThis, types_.getOrCreatePointerType(classType));
-                    if (auto * base = classType->getBase()) {
-                        names_.addVariable(symbols::KwBase, types_.getOrCreatePointerType(classType->getBase()));
-                    }
-                    for (auto & i : ast->args) {
-                        names_.addVariable(i->name->name, i->type->getType());
-                    }
-                    // typecheck the method body
-                    auto * actualReturn = visitChild(ast->body);
-                    checkReturnType(functionType, actualReturn, ast);
-                }
-                // leaves the method context
-                names_.leaveCurrentScope();
-            }
-        } else if (auto * interfaceType = context->complexType->as<Type::Interface>()) {
-            std::unique_ptr<Type::Function> ftype{new Type::Function{visitChild(ast->typeDecl)}};
-            checkTypeCompletion(ftype->returnType(), ast->typeDecl);
-            // adds argument types
-            ftype->addArgument(types_.getOrCreatePointerType(types_.getTypeVoid()));
-            for (auto & i : ast->args) {
-                auto * argType = visitChild(i->type);
-                checkTypeCompletion(argType, i->type);
-                ftype->addArgument(argType);
-            }
-            // registers function type
-            auto * functionType = types_.getOrCreateFunctionType(std::move(ftype));
-            ast->setType(functionType);
-            auto methodName = ast->name;
-            // registers self as member of the class
-            interfaceType->registerField(methodName, types_.getOrCreatePointerType(functionType), ast);
-        }
-    }
+
 
     /** Type checking a structure declaration creates the type.
      */
@@ -261,6 +178,8 @@ namespace tinycplus {
      */
     void TypeChecker::visit(ASTClassDecl * ast) {
         auto * type = types_.getOrCreateClassType(ast->name);
+        // adding default constructor function type
+        types_.getOrCreateFunctionType(std::unique_ptr<Type::Function>{new Type::Function{type}});
         updatePartialDecl(type, ast);
         ast->setType(type);
         if (ast->baseClass) {
@@ -283,6 +202,17 @@ namespace tinycplus {
                 visitChild(i);
                 wipeContext(position);
             }
+            bool baseConstructorIsUsed = false;
+            for (auto & i : ast->constructors) {
+                auto position = push<Context::Complex>({type});
+                visitChild(i);
+                wipeContext(position);
+                baseConstructorIsUsed |= i->base.has_value();
+            }
+            if (ast->baseClass != nullptr && !baseConstructorIsUsed) throw ParserError{
+                STR("At least one base constructor must be used."),
+                ast->location()
+            };
         }
     }
 
@@ -533,28 +463,70 @@ namespace tinycplus {
             if (context.has_value()) push(context.value());
             visitChild(ast->function);
         }
-        Type::Function const * f = asFunctionType(ast->function->getType());
-        if (f == nullptr) throw ParserError {
-            STR("Expected function, but value of " << ast->function->getType()->toString() << " found"), ast->location()
-        };
-        if (ast->args.size() != f->numArgs() - methodOffset) throw ParserError {
-            STR("Function of type " << f->toString() << " requires "
-                << f->numArgs() - methodOffset
-                << " arguments, but " << ast->args.size() << " given"),
-            ast->location()
-        };
-        for (size_t i = 0; i < ast->args.size(); ++i) {
-            auto * argType = visitChild(ast->args[i]);
-            auto * expectedArgType = f->argType(i + methodOffset);
-            if (argType != expectedArgType) {
-                throw ParserError{
-                    STR("Type " << expectedArgType->toString() << " expected for argument " << (i + 1)
-                        << ", but " << argType->toString() << " found"),
-                    ast->args[i]->location()
-                };
+        Type::Class * classType = nullptr; // constructor call
+        if (auto * namedTypeAst = ast->function->as<ASTNamedType>()) {
+            if (auto * constructorType = types_.getType(namedTypeAst->name)) {
+                classType = constructorType->as<Type::Class>();
             }
         }
-        return ast->setType(f->returnType());
+
+        if (classType != nullptr) {
+            std::vector<Type*> argTypes;
+            for (size_t i = 0; i < ast->args.size(); ++i) {
+                auto * argType = visitChild(ast->args[i]);
+                argTypes.push_back(argType);
+            }
+            bool constructorIsFound = classType->constructors.size() == 0;
+            if (!constructorIsFound) {
+                for (auto * f : classType->constructors) {
+                    bool argsAreEqual = true;
+                    if (argTypes.size() != f->numArgs()) continue;
+                    for (size_t i = 0; i < f->numArgs(); i++) {
+                        auto * argType = f->argType(i);
+                        if (argType != argTypes[i]) {
+                            argsAreEqual = false;
+                            break;
+                        }
+                    }
+                    if (argsAreEqual) { 
+                        constructorIsFound = true;
+                        break;
+                    }
+                }
+            }
+            if (!constructorIsFound) {
+                throw ParserError {
+                    STR("No matching constructor of class (" << classType->toString() << ") was found."),
+                    ast->location()
+                };
+            }
+            return ast->setType(classType);
+        } else {
+            Type::Function const * f = asFunctionType(ast->function->getType());
+            if (f == nullptr) {
+                throw ParserError {
+                    STR("Expected function, but value of " << ast->function->getType()->toString() << " found"), ast->location()
+                };
+            }
+            if (ast->args.size() != f->numArgs() - methodOffset) throw ParserError {
+                STR("Function of type " << f->toString() << " requires "
+                    << f->numArgs() - methodOffset
+                    << " arguments, but " << ast->args.size() << " given"),
+                ast->location()
+            };
+            for (size_t i = 0; i < ast->args.size(); ++i) {
+                auto * argType = visitChild(ast->args[i]);
+                auto * expectedArgType = f->argType(i + methodOffset);
+                if (argType != expectedArgType) {
+                    throw ParserError{
+                        STR("Type " << expectedArgType->toString() << " expected for argument " << (i + 1)
+                            << ", but " << argType->toString() << " found"),
+                        ast->args[i]->location()
+                    };
+                }
+            }
+            return ast->setType(f->returnType());
+        }
     }
 
     /** Makes sure that incompatible types are not casted.

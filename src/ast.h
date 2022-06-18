@@ -279,11 +279,18 @@ namespace tinycplus {
 
 
 
+    enum class AccessMod {
+        Public,
+        Private,
+        Protected,
+    };
+
     class ASTVarDecl : public AST {
     public:
         std::unique_ptr<ASTType> type;
         std::unique_ptr<ASTIdentifier> name;
         std::unique_ptr<AST> value;
+        AccessMod accessMod = AccessMod::Public;
     public:
         ASTVarDecl(Token const & t, std::unique_ptr<ASTType> type):
             AST{t},
@@ -330,16 +337,38 @@ namespace tinycplus {
 
     class ASTFunDecl : public ASTPartialDecl {
     public:
+        struct Base {
+            std::unique_ptr<ASTType> name;
+            std::vector<std::unique_ptr<ASTIdentifier>> args;
+            Symbol getName() const { return name->as<ASTNamedType>()->name; }
+        };
+        enum class Virtuality {
+            None,
+            Virtual,
+            Abstract,
+            Override,
+        };
+        Virtuality virtuality;
+    public:
+        FunctionKind kind;
         std::unique_ptr<ASTType> typeDecl;
-        Symbol name;
         std::vector<std::unique_ptr<ASTVarDecl>> args;
         std::unique_ptr<AST> body;
+        std::optional<Symbol> name;
+        std::optional<Base> base;
     public:
-        ASTFunDecl(Token const & t, std::unique_ptr<ASTType> type):
-            ASTPartialDecl{t},
-            typeDecl{std::move(type)},
-            name{t.valueSymbol()} {
-        }
+        ASTFunDecl(Token const & t, std::unique_ptr<ASTType> type)
+            :ASTPartialDecl{t}
+            ,typeDecl{std::move(type)}
+        { }
+    public:
+        bool isMethod() const { return kind == FunctionKind::Method; }
+        bool isConstructor() const { return kind == FunctionKind::Constructor; }
+        bool isPureFunction() const { return !isMethod() && !isConstructor(); }
+        bool isAbstract() const { return virtuality == Virtuality::Abstract; }
+        bool isVirtual() const { return virtuality == Virtuality::Virtual; }
+        bool isOverride() const { return virtuality == Virtuality::Override; }
+        bool isVirtualized() const { return isVirtual() || isOverride() || isAbstract(); }
     protected:
         void accept(ASTVisitor * v) override;
     };
@@ -363,38 +392,10 @@ namespace tinycplus {
 
 
 
-    class ASTMethodDecl : public ASTFunDecl {
-    public:
-        enum class Virtuality {
-            None,
-            Virtual,
-            Abstract,
-            Override,
-        };
-        Virtuality virtuality;
-    public:
-        ASTMethodDecl(Token const & t, std::unique_ptr<ASTType> type)
-            :ASTFunDecl{t, std::move(type)}
-            ,virtuality{Virtuality::None}
-        {
-            isDefinition = true; // methods must always have a body
-        }
-    public:
-        bool isAbstract() const { return virtuality == Virtuality::Abstract; }
-        bool isVirtual() const { return virtuality == Virtuality::Virtual; }
-        bool isOverride() const { return virtuality == Virtuality::Override; }
-        bool isVirtualized() const { return isVirtual() || isOverride() || isAbstract(); }
-    protected:
-        void accept(ASTVisitor * v) override;
-    };
-
-
-
-
     class ASTInterfaceDecl : public ASTPartialDecl {
     public:
         Symbol name;
-        std::vector<std::unique_ptr<ASTMethodDecl>> methods;
+        std::vector<std::unique_ptr<ASTFunDecl>> methods;
     public:
         ASTInterfaceDecl(Token const & t, Symbol name):
             ASTPartialDecl{t},
@@ -412,7 +413,8 @@ namespace tinycplus {
         Symbol name;
         std::unique_ptr<ASTType> baseClass;
         std::vector<std::unique_ptr<ASTVarDecl>> fields;
-        std::vector<std::unique_ptr<ASTMethodDecl>> methods;
+        std::vector<std::unique_ptr<ASTFunDecl>> methods;
+        std::vector<std::unique_ptr<ASTFunDecl>> constructors;
     public:
         ASTClassDecl(Token const & t, Symbol name):
             ASTPartialDecl{t},
@@ -782,7 +784,6 @@ namespace tinycplus {
         virtual void visit(ASTStructDecl * ast) = 0;
         virtual void visit(ASTInterfaceDecl * ast) = 0;
         virtual void visit(ASTClassDecl * ast) = 0;
-        virtual void visit(ASTMethodDecl * ast) = 0;
         virtual void visit(ASTIf * ast) = 0;
         virtual void visit(ASTSwitch * ast) = 0;
         virtual void visit(ASTWhile * ast) = 0;
@@ -826,7 +827,6 @@ namespace tinycplus {
     inline void ASTStructDecl::accept(ASTVisitor * v) { v->visit(this); }
     inline void ASTInterfaceDecl::accept(ASTVisitor * v) { v->visit(this); }
     inline void ASTClassDecl::accept(ASTVisitor * v) { v->visit(this); }
-    inline void ASTMethodDecl::accept(ASTVisitor * v) { v->visit(this); }
     inline void ASTIf::accept(ASTVisitor * v) { v->visit(this); }
     inline void ASTSwitch::accept(ASTVisitor * v) { v->visit(this); }
     inline void ASTWhile::accept(ASTVisitor * v) { v->visit(this); }

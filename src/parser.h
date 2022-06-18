@@ -2,6 +2,7 @@
 
 // standard
 #include <unordered_set>
+#include <optional>
 
 // internal
 #include "shared.h"
@@ -19,6 +20,8 @@ namespace tinycplus {
         }
 
     protected:
+
+        std::optional<Symbol> className = std::nullopt;
 
         Parser(std::vector<Token> && tokens): ParserBase{std::move(tokens)} { }
 
@@ -116,9 +119,9 @@ namespace tinycplus {
 
             Nothing fancy here, just a very simple recursive descent parser built on the basic framework.
          */
+        AccessMod ACCESS_MOD();
         std::unique_ptr<AST> PROGRAM();
-        std::unique_ptr<AST> REPL();
-        std::unique_ptr<AST> FUN_DECL(bool isMethod);
+        std::unique_ptr<AST> FUN_DECL(FunctionKind kind);
         std::unique_ptr<AST> STATEMENT();
         std::unique_ptr<AST> BLOCK_STMT();
         std::unique_ptr<ASTIf> IF_STMT();
@@ -138,9 +141,9 @@ namespace tinycplus {
         std::unique_ptr<ASTInterfaceDecl> Parser::INTERFACE_DECL();
         std::unique_ptr<ASTClassDecl> CLASS_DECL();
         std::unique_ptr<AST> EXPR_OR_VAR_DECL();
-        std::unique_ptr<ASTVarDecl> VAR_DECL();
+        std::unique_ptr<ASTVarDecl> VAR_DECL(bool isField);
         std::unique_ptr<AST> VAR_DECLS();
-        std::unique_ptr<AST> FUN_OR_VAR_DECL(bool isForClass);
+        std::unique_ptr<AST> FUN_OR_VAR_DECL(std::optional<Symbol> className);
         std::unique_ptr<AST> EXPR();
         std::unique_ptr<AST> EXPRS();
         std::unique_ptr<AST> E9();

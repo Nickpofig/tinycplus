@@ -3,7 +3,7 @@ Transpiler from Object-Oriented extension TinyC+ to TinyC programming lamguage.
 
 # Language Reference
 
-    PROGRAM := { FUN_DECL | VAR_DECLS ';' | STRUCT_DECL | FUNPTR_DECL | CLASS_DECL }
+    PROGRAM := { FUN_DECL | VAR_DECLS ';' | STRUCT_DECL | FUNPTR_DECL | CLASS_DECL | INTERFACE_DECL }
 
 A program is collection of ordered function, type, and variable declarations. Order is defined by dependency of declarations on each other: a declaration happens before its use.
 

@@ -11,6 +11,7 @@
 #include "parser.h"
 #include "transpiler.h"
 #include "typechecker.h"
+#include "tinyc_to_cpp_converter.h"
 
 namespace program_errors {
     const std::string no_input = "[E1] input filepath is not given";
@@ -21,6 +22,7 @@ tiny::Symbol tinycplus::symbols::Entry = tinycplus::symbols::NoEntry;
 
 const std::string keyColorful = "--colorful";
 const std::string keyEntry = "--entry";
+const std::string keyTinyCtoCpp = "--tinyc-to-cpp"; 
 
 void checkForHelpRequest(int argc, char** argv) {
     const std::string tab {"    "};
@@ -38,6 +40,9 @@ void checkForHelpRequest(int argc, char** argv) {
             std::cerr << tab << keyEntry << " -> "
                 << "sets the entry point for TinyC output program."
                 << std::endl;
+            std::cerr << tab << keyTinyCtoCpp << " -> "
+                << "asks program to treat input file as tinyC file and convert it to general C++ file."
+                << std::endl;
             exit(EXIT_SUCCESS);
         }
     }
@@ -46,13 +51,18 @@ void checkForHelpRequest(int argc, char** argv) {
 int main(int argc, char ** argv) {
     checkForHelpRequest(argc, argv);
     tiny::config.parse(argc, argv);
-    tiny::config.setDefaultIfMissing(keyColorful, "false");
+    tiny::config.setDefaultIfMissing(keyColorful, "F");
+    tiny::config.setDefaultIfMissing(keyTinyCtoCpp, "F");
     tiny::config.setDefaultIfMissing(keyEntry, tinycplus::symbols::NoEntry.name());
     auto inputFilepath = tiny::config.input();
-    bool isPrintColorful = tiny::config.get(keyColorful).compare("true") == 0;
+    bool isPrintColorful = tiny::config.get(keyColorful).compare("T") == 0;
+    bool isConvertingTinycToCPP = tiny::config.get(keyTinyCtoCpp).compare("T") == 0;
     tinycplus::symbols::Entry = tiny::Symbol{tiny::config.get(keyEntry)};
     if (!std::filesystem::exists(inputFilepath)) {
         throw std::runtime_error(program_errors::no_input);
+    }
+    if (isConvertingTinycToCPP) {
+        tinycToCpp::execute(inputFilepath);
     }
     try {
         tinycplus::TypesContext typesContext{};

@@ -112,11 +112,7 @@ namespace tinycplus {
 
         Type::Class * getOrCreateClassType(Symbol name) {
             auto maker = [name] () {
-                auto vtableName = symbols::startLanguageName()
-                    .add(name)
-                    .add("_vtable")
-                    .end();
-                auto * vtable = new Type::VTable{vtableName};
+                auto * vtable = new Type::VTable{name};
                 return new Type::Class{name, vtable};
             };
             return getOrCreateNonAliasType<Type::Class>(name, maker);
@@ -149,21 +145,21 @@ namespace tinycplus {
             return i->second.get();
         }
 
-        void findEachVirtualTable(std::vector<Type::VTable*> & result) {
+        void findEachClassType(std::vector<Type::Class*> & result) {
             for (auto & type : types_) {
-                if (auto vtable = type.second->as<Type::VTable>()) {
+                if (auto * vtable = type.second->as<Type::Class>()) {
                     result.push_back(vtable);
                 }
             }
         }
 
-        void addMethodToClass(ASTMethodDecl * methodAst, Type::Class * classType, bool isInterfaceMethod) {
-            auto methodName = methodAst->name;
+        void addMethodToClass(ASTFunDecl * methodAst, Type::Class * classType, bool isInterfaceMethod) {
+            auto methodName = methodAst->name.value();
             auto * functionType = methodAst->getType()->as<Type::Function>();
             classType->registerMethod(methodName, functionType, methodAst, isInterfaceMethod);
             if (methodAst->isVirtualized()) {
                 auto * vtable = classType->getVirtualTable();
-                auto functionPointerName = symbols::startLanguageName()
+                auto functionPointerName = symbols::system()
                     .add(classType->toString())
                     .add("__vtable__")
                     .add(methodName)
@@ -178,7 +174,7 @@ namespace tinycplus {
     /** An information about TinyC+ program names.
      */
     class NamesContext {
-    private:
+    private: // user names
         class Space {
         public: // data
             Type * returnType;

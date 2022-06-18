@@ -87,17 +87,17 @@ namespace tinycplus {
     }
 
     void Transpiler::visit(ASTBlock * ast) {
+        auto * functionAst = peekAst()->as<ASTFunDecl>();
+        auto * classAst = peekAst(1)->as<ASTClassDecl>();
         pushAst(ast);
         /// TODO: refactor code -> root is a special case that happens once - no need to check for it for all blocks
         printSymbol(Symbol::CurlyOpen);
         printer_.indent();
-        if (auto * function = peekAst()->as<ASTFunDecl>();
-            function != nullptr // is a function
-        ) {
-            if (auto method = function->as<ASTMethodDecl>()) {
-                auto * classType = peekAst(1)->as<ASTClassDecl>()->getType()->as<Type::Class>();
+        if (functionAst != nullptr) {
+            if (functionAst->isMethod()) {
+                auto classType = classAst->getType()->as<Type::Class>();
                 if (classType != nullptr) {
-                    auto methodInfo = classType->getMethodInfo(method->name);
+                    auto methodInfo = classType->getMethodInfo(functionAst->name.value());
                     assert(methodInfo.has_value());
                     bool isInterface = methodInfo.value().isInterfaceMethod;
                     if (isInterface) {
@@ -119,26 +119,89 @@ namespace tinycplus {
                         printSymbol(Symbol::ParClose);
                     }
                 }
-            } else if (function->name == symbols::Main) {
+            } else if (functionAst->isConstructor()) {
+                auto classType = classAst->getType()->as<Type::Class>();
+                printNewline();
+                if (!classConstructorIsIniting) {
+                    // ** hidden class instance (x)
+                    printType(classType);
+                    printSpace();
+                    printIdentifier(symbols::HiddenThis);
+                    printSymbol(Symbol::Semicolon);
+                    printNewline();
+                    // ** pointer to instance (x)
+                    printType(classType);
+                    printSpace();
+                    printSymbol(Symbol::Mul);
+                    printSpace();
+                    printIdentifier(symbols::KwThis);
+                    printSpace();
+                    printSymbol(Symbol::Assign);
+                    printSpace();
+                    printSymbol(Symbol::BitAnd);
+                    printIdentifier(symbols::HiddenThis);
+                    printSymbol(Symbol::Semicolon);
+                    printNewline();
+                }
+                // ** assigns vtable
+                printVTableInstanceAssignment(classType, true);
+                // ** call base class constructor init version
+                if (functionAst->base.has_value()) {
+                    auto & base = functionAst->base.value();
+                    auto baseClassType = types_.getType(base.getName())->as<Type::Class>();
+                    printIdentifier(baseClassType->initName);
+                    printSymbol(Symbol::ParOpen);
+                    // *** passed "this" into init call
+                    printKeyword(Symbol::KwCast);
+                    printSymbol(Symbol::Lt);
+                    printType(baseClassType->name);
+                    printSymbol(Symbol::Mul);
+                    printSymbol(Symbol::Gt);
+                    printSymbol(Symbol::ParOpen);
+                    printIdentifier(symbols::KwThis);
+                    printSymbol(Symbol::ParClose);
+                    printSymbol(Symbol::Comma);
+                    printSpace();
+                    // *** other arguments
+                    if (base.args.size() > 0) {
+                        printIdentifier(base.args[0]->name);
+                        for (size_t i = 1; i < base.args.size(); i++) {
+                            printSymbol(Symbol::Comma);
+                            printIdentifier(base.args[i]->name);
+                        }
+                    }
+                    printSymbol(Symbol::ParClose);
+                    printSymbol(Symbol::Semicolon);
+                    printNewline();
+                }
+                if (!classConstructorIsIniting) {
+                    printNewline();
+                    printSymbol(Symbol::KwReturn);
+                    printSpace();
+                    printSymbol(symbols::HiddenThis);
+                    printSymbol(Symbol::Semicolon);
+                }
+            } else if (functionAst->name == symbols::Main) {
                 // Program Entry must be fully declared only after all class declarations and never earlier.
                 // Otherwise resulted TinyC code won't compile.
                 programEntryWasDefined_ = true;
-                printer_.newline();
-                std::vector<Type::VTable*> vtables;
-                types_.findEachVirtualTable(vtables);
+                printNewline();
+                std::vector<Type::Class*> classTypes;
+                types_.findEachClassType(classTypes);
                 printComment(" === Initializing virtual tables === ");
-                for (auto * vtable : vtables) {
-                    printIdentifier(vtable->getGlobalInitFunctionName());
+                for (auto * classType : classTypes) {
+                    printIdentifier(classType->getVirtualTable()->initName);
                     printSymbol(Symbol::ParOpen);
                     printSymbol(Symbol::ParClose);
                     printSymbol(Symbol::Semicolon);
-                    printer_.newline();
+                    printNewline();
                 }
+                printNewline();
                 printComment(" === Running the rest of the program === ");
             }
         }  
         for (auto & i : ast->body) {
-            printer_.newline();
+            printNewline();
             visitChild(i.get());
             /// TODO: check semicolon is set correctly when necessary
             if (!i->as<ASTBlock>()
@@ -158,18 +221,18 @@ namespace tinycplus {
     }
 
     void Transpiler::visit(ASTProgram * ast) {
+        printer_.newline();
         pushAst(ast);
         for (auto & i : ast->body) {
             visitChild(i.get());
-            if (!i->as<ASTFunDecl>()) {
-                printSymbol(Symbol::Semicolon);
-            }
+            printer_.newline();
             printer_.newline();
         }
         popAst();
     }
 
     void Transpiler::visit(ASTVarDecl * ast) {
+        auto parentAst = peekAst();
         pushAst(ast);
         validateName(ast->name->name);
         if (auto arrayType = ast->type->as<ASTArrayType>()) {
@@ -195,51 +258,28 @@ namespace tinycplus {
             printSymbol(Symbol::Assign);
             printSpace();
             visitChild(ast->value.get());
-        } else if (auto * complexType = ast->getType()->as<Type::Complex>();
-            complexType != nullptr
-            && complexType->requiresImplicitConstruction()
-            && peekAst()->as<ASTSequence>()
-        ) {
-            printSpace();
-            printSymbol(Symbol::Assign);
-            printSpace();
-            printIdentifier(complexType->getConstructorName());
-            printSymbol(Symbol::ParOpen);
-            printSymbol(Symbol::ParClose);
         }
-        popAst();
-    }
-
-    void Transpiler::visit(ASTFunDecl * ast) {
-        pushAst(ast);
-        validateName(ast->name);
-        // * function return type
-        visitChild(ast->typeDecl.get());
-        printSpace();
-        // * function name
-        printIdentifier(ast->name.name());
-        registerDeclaration(ast->name.name(), ast->name.name(), 1);
-        // * function arguments
-        printSymbol(Symbol::ParOpen);
-        auto arg = ast->args.begin();
-        if (arg != ast->args.end()) {
-            visitChild(arg[0].get());
-            while (++arg != ast->args.end()) {
-                printSymbol(Symbol::Comma);
-                printSpace();
-                visitChild(arg[0].get());
-            }
-        }
-        printSymbol(Symbol::ParClose);
-        // * function body
-        if (ast->body) {
-            printSpace();
-            visitChild(ast->body.get());
-        } else {
+        if (parentAst->as<ASTBlock>()
+            || parentAst->as<ASTStructDecl>()
+            || parentAst->as<ASTClassDecl>()
+            || parentAst->as<ASTInterfaceDecl>())
+        {
             printSymbol(Symbol::Semicolon);
         }
         popAst();
     }
+
+
+
+
+    void Transpiler::visit(ASTFunDecl * ast) {
+        if (ast->isMethod()) printMethod(ast);
+        else if (ast->isConstructor()) printConstructor(ast);
+        else printFunction(ast);
+    }
+
+
+
 
     void Transpiler::visit(ASTStructDecl * ast) {
         pushAst(ast);
@@ -247,13 +287,13 @@ namespace tinycplus {
         printKeyword(Symbol::KwStruct);
         printSpace();
         printIdentifier(ast->name.name());
+        printSpace();
         if (ast->isDefinition) {
             printSymbol(Symbol::CurlyOpen);
             printer_.indent();
             for (auto & i : ast->fields) {
                 printer_.newline();
                 visitChild(i.get());
-                printSymbol(Symbol::Semicolon);
             }
             printer_.dedent();
             printer_.newline();
@@ -261,7 +301,6 @@ namespace tinycplus {
             printSymbol(Symbol::Semicolon);
         }
         printer_.newline();
-        printComplexTypeConstructorDeclaration(ast->getType()->as<Type::Complex>());
         popAst();
     }
 
@@ -327,30 +366,30 @@ namespace tinycplus {
         validateName(ast->name);
         auto * classType = ast->getType()->as<Type::Class>();
         auto * vtableType = classType->getVirtualTable();
-        printer_.newline();
-        printComment(STR(" === class " << ast->name.name() << " ==="));
-        printer_.newline();
+        printComment(STR(" --- class " << ast->name.name() << " --- id:" << classType->getId()));
         printer_.newline();
         // * virtual table declaration and definition
         if (classType->isFullyDefined()) {
             std::vector<FieldInfo> vtableFields;
             vtableType->collectFieldsOrdered(vtableFields);
             for (auto & it : vtableFields) {
-                printFunctionPointerTypeDeclaration(it.type->as<Type::Alias>());
+                printFunctionPointerType(it.type->as<Type::Alias>());
             }
-            printVTableDeclaration(classType);
+            printVTableStruct(classType);
         }
         // * class declarartion
         printKeyword(Symbol::KwStruct);
         printSpace();
         printIdentifier(ast->name.name());
+        printSpace();
         if (ast->isDefinition) {
             // ** class declaration opened
             printSymbol(Symbol::CurlyOpen);
             printer_.indent();
             // ** vtable pointer declaration
             printer_.newline();
-            printType(classType->isAbstract() ? types_.getTypeVoid() : vtableType);
+            printType(classType->isAbstract() ? Symbol::KwVoid : vtableType->typeName);
+            printSpace();
             printSymbol(Symbol::Mul);
             printSpace();
             printIdentifier(symbols::VTable);
@@ -361,7 +400,6 @@ namespace tinycplus {
             for (auto & i : classFields) {
                 printer_.newline();
                 visitChild(i.ast);
-                printSymbol(Symbol::Semicolon);
             }
             // ** class declaration closed
             printer_.dedent();
@@ -377,61 +415,31 @@ namespace tinycplus {
             }
             printer_.newline();
             if (!classType->isAbstract()) {
-                printVTableInitFunctionDeclaration(classType);
-                printComplexTypeConstructorDeclaration(classType);
+                printVTableInitFunction(classType);
+            }
+            // ** constructor instance make declarations
+            if (ast->constructors.size() == 0) {
+                printDefaultConstructor(classType);
+            } else {
+                classConstructorIsIniting = false;
+                for (auto & i : ast->constructors) {
+                    if (i->isAbstract()) continue;
+                    printer_.newline();
+                    visitChild(i.get());
+                }
+                // ** constructor instance init declarations
+                classConstructorIsIniting = true;
+                for (auto & i : ast->constructors) {
+                    printer_.newline();
+                    visitChild(i.get());
+                }
             }
         }
         popAst();
     }
 
 
-    void Transpiler::visit(ASTMethodDecl * ast) {
-        auto * classParent = peekAst()->as<ASTClassDecl>();
-        assert(classParent && "must have an ast class decl as parent ast");
-        pushAst(ast);
-        validateName(ast->name);
-        // * method return type
-        visitChild(ast->typeDecl.get());
-        printSpace();
-        // * method name
-        auto classType = classParent->getType()->as<Type::Class>();
-        bool isInterfaceMethod = classType->getMethodInfo(ast->name).value().isInterfaceMethod;
-        auto info = classType->getMethodInfo(ast->name).value();
-        registerDeclaration(info.fullName, ast->name, 1);
-        printIdentifier(info.fullName);
-        // * method arguments
-        printSymbol(Symbol::ParOpen);
-        // inserts pointer to the owner class as the first argument
-        printType(classParent->name.name());
-        printSymbol(Symbol::Mul);
-        printSpace();
-        printIdentifier(isInterfaceMethod
-            ? symbols::ThisInterface
-            : symbols::KwThis
-        );
-        if (ast->args.size() > 0) {
-            printSymbol(Symbol::Comma);
-            printSpace();
-        }
-        auto arg = ast->args.begin();
-        if (arg != ast->args.end()) {
-            visitChild(arg[0].get());
-            while (++arg != ast->args.end()) {
-                printSymbol(Symbol::Comma);
-                printSpace();
-                visitChild(arg[0].get());
-            }
-        }
-        printSymbol(Symbol::ParClose);
-        // * method body
-        if (ast->body) {
-            printSpace();
-            visitChild(ast->body.get());
-        } else {
-            printSymbol(Symbol::Semicolon);
-        }
-        popAst();
-    }
+
 
     void Transpiler::visit(ASTFunPtrDecl * ast) {
         pushAst(ast);
@@ -598,22 +606,30 @@ namespace tinycplus {
     }
 
     void Transpiler::visit(ASTAssignment * ast) {
-        pushAst(ast);
+        auto * parentAst = peekAst()->as<ASTBlock>();
+        pushAst(ast); 
         {
             visitChild(ast->lvalue.get()); 
             printSpace();
             printSymbol(ast->op.name());
             printSpace();
             visitChild(ast->value.get());
+            if (parentAst != nullptr) {
+                printSymbol(Symbol::Semicolon);
+            }
         }
         popAst();
     }
 
     void Transpiler::visit(ASTUnaryOp * ast) {
+        auto parentAsBlock = peekAst()->as<ASTBlock>();
         pushAst(ast);
         {
             printSymbol(ast->op.name());
             visitChild(ast->arg.get());
+            if (parentAsBlock != nullptr) {
+                printSymbol(Symbol::Semicolon);
+            }
         }
         popAst();
     }
@@ -670,6 +686,7 @@ namespace tinycplus {
     }
 
     void Transpiler::visit(ASTCall * ast) {
+        auto parentBlock = peekAst()->as<ASTBlock>();
         auto * member = peekAst()->as<ASTMember>();
         pushAst(ast);
         auto * ident = ast->function->as<ASTIdentifier>();
@@ -722,7 +739,12 @@ namespace tinycplus {
             }
             printSymbol(Symbol::ParClose);
         } else { // function or global function pointer type variable call
-            visitChild(ast->function.get());
+            auto * classType = ast->function->getType()->as<Type::Class>();
+            if (classType != nullptr) {
+                printIdentifier(classType->makeName);
+            } else {
+                visitChild(ast->function.get());
+            }
             printSymbol(Symbol::ParOpen);
             auto i = ast->args.begin();
             if (i != ast->args.end()) {
@@ -734,6 +756,9 @@ namespace tinycplus {
                 }
             }
             printSymbol(Symbol::ParClose);
+        }
+        if (parentBlock != nullptr) {
+            printSymbol(Symbol::Semicolon);
         }
         popAst();
     }
