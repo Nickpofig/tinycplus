@@ -132,8 +132,9 @@ namespace tinycplus {
 
 
     void TypeChecker::visit(ASTFunDecl * ast) {
-        if (ast->isMethod()) processMethod(ast);
-        else if (ast->isConstructor()) processConstructor(ast);
+        if (ast->isClassMethod()) processMethod(ast);
+        else if (ast->isClassConstructor()) processConstructor(ast);
+        else if (ast->isInterfaceMethod()) processInterfaceMethod(ast);
         else processFunction(ast);
     }
 
@@ -166,8 +167,11 @@ namespace tinycplus {
         ast->setType(type);
         for (auto & i : ast->methods) {
             auto position = push<Context::Complex>({type});
-            visitChild(i);
+            auto * methodType = visitChild(i)->as<Type::Function>();
+            auto methodName = i->name.value();
             wipeContext(position);
+            // std::cout << "DEBUG: Adding " << methodName << "(" << methodType->toString() << ") method to interface type: " << type->toString() << std::endl;
+            types_.addMethodToInterface(i.get(), type);
         }
     }
 
@@ -182,8 +186,9 @@ namespace tinycplus {
         types_.getOrCreateFunctionType(std::unique_ptr<Type::Function>{new Type::Function{type}});
         updatePartialDecl(type, ast);
         ast->setType(type);
+        Type::Class * baseType = nullptr;
         if (ast->baseClass) {
-            auto * baseType = visitChild(ast->baseClass)->as<Type::Class>();
+            baseType = visitChild(ast->baseClass)->as<Type::Class>();
             assert(baseType != nullptr);
             if (!isDefined(baseType)) throw ParserError{
                 STR("[T2] A base type must be fully defined before inherited."),
@@ -202,17 +207,29 @@ namespace tinycplus {
                 visitChild(i);
                 wipeContext(position);
             }
+            // checks constructor reuse of base class constructors
             bool baseConstructorIsUsed = false;
             for (auto & i : ast->constructors) {
                 auto position = push<Context::Complex>({type});
                 visitChild(i);
                 wipeContext(position);
                 baseConstructorIsUsed |= i->base.has_value();
+                // if (baseConstructorIsUsed && baseType == nullptr) throw ParserError{
+                //     STR("TYPECHECK: no suitable base constructor was found."),
+                //     ast->location()
+                // };
             }
-            if (ast->baseClass != nullptr && !baseConstructorIsUsed) throw ParserError{
-                STR("At least one base constructor must be used."),
-                ast->location()
-            };
+            if (baseType != nullptr) {
+                bool baseHasConstructor = baseType->constructors.size() > 0;
+                if (baseHasConstructor && !baseConstructorIsUsed) throw ParserError{
+                    STR("TYPECHECK: at least one base constructor must be used."),
+                    ast->location()
+                };
+            }
+            for (auto & it : ast->interfaces) {
+                auto * interfaceType = visitChild(it)->as<Type::Interface>();
+                type->addInterfaceType(interfaceType);
+            }
         }
     }
 
@@ -448,21 +465,35 @@ namespace tinycplus {
     }
 
     void TypeChecker::visit(ASTCall * ast) {
+        // std::cout << "DEBUG: typechicking call " << std::endl;
         int methodOffset = 0;
         auto context = pop<Context::Member>();
         if (context.has_value()) {
-            auto * classType = context->memberBaseType->as<Type::Class>();
-            methodOffset = 1;
-            auto * ident = dynamic_cast<ASTIdentifier*>(ast->function.get());
-            auto methodInfo = classType->getMethodInfo(ident->name);
-            if (!methodInfo.has_value()) throw ParserError {
-                STR("Method [" << ident->name << "] was not found!"), ast->location(), false
-            };
-            ident->setType(methodInfo.value().type);
+            methodOffset = 1; // both class and interface methods has an implicit first argument.
+            if (auto * classType = context->memberBaseType->as<Type::Class>()) {
+                auto * ident = dynamic_cast<ASTIdentifier*>(ast->function.get());
+                auto methodInfo = classType->getMethodInfo(ident->name);
+                if (!methodInfo.has_value()) throw ParserError {
+                    STR("TYPECHECK: method (" << ident->name << ") was not found for class: " << classType->name), ast->location(), false
+                };
+                ident->setType(methodInfo.value().type);
+            } else if (auto * interfaceType = context->memberBaseType->as<Type::Interface>()) {
+                auto * ident = dynamic_cast<ASTIdentifier*>(ast->function.get());
+                auto methodType = interfaceType->getMethod(ident->name);
+                // for (auto & it : interfaceType->methods_) {
+                //     std::cout << "DEBUG: interface (" << interfaceType->name << ") has method: " << it.first << std::endl;
+                // }
+                // types_.printAllTypes();
+                if (!methodType.has_value()) throw ParserError {
+                    STR("TYPECHECK: method [" << ident->name << "] was not found for interface: " << interfaceType->name), ast->location(), false
+                };
+                ident->setType(methodType.value());
+            }
         } else {
             if (context.has_value()) push(context.value());
             visitChild(ast->function);
         }
+
         Type::Class * classType = nullptr; // constructor call
         if (auto * namedTypeAst = ast->function->as<ASTNamedType>()) {
             if (auto * constructorType = types_.getType(namedTypeAst->name)) {
@@ -496,7 +527,7 @@ namespace tinycplus {
             }
             if (!constructorIsFound) {
                 throw ParserError {
-                    STR("No matching constructor of class (" << classType->toString() << ") was found."),
+                    STR("TYPECHECK: no matching constructor of class (" << classType->toString() << ") was found."),
                     ast->location()
                 };
             }
@@ -505,11 +536,11 @@ namespace tinycplus {
             Type::Function const * f = asFunctionType(ast->function->getType());
             if (f == nullptr) {
                 throw ParserError {
-                    STR("Expected function, but value of " << ast->function->getType()->toString() << " found"), ast->location()
+                    STR("TYPECHECK: expected function, but value of " << ast->function->getType()->toString() << " found"), ast->location()
                 };
             }
             if (ast->args.size() != f->numArgs() - methodOffset) throw ParserError {
-                STR("Function of type " << f->toString() << " requires "
+                STR("TYPECHECK: function of type " << f->toString() << " requires "
                     << f->numArgs() - methodOffset
                     << " arguments, but " << ast->args.size() << " given"),
                 ast->location()
@@ -519,7 +550,7 @@ namespace tinycplus {
                 auto * expectedArgType = f->argType(i + methodOffset);
                 if (argType != expectedArgType) {
                     throw ParserError{
-                        STR("Type " << expectedArgType->toString() << " expected for argument " << (i + 1)
+                        STR("TYPECHECK: type " << expectedArgType->toString() << " expected for argument " << (i + 1)
                             << ", but " << argType->toString() << " found"),
                         ast->args[i]->location()
                     };

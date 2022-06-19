@@ -94,32 +94,7 @@ namespace tinycplus {
         printSymbol(Symbol::CurlyOpen);
         printer_.indent();
         if (functionAst != nullptr) {
-            if (functionAst->isMethod()) {
-                auto classType = classAst->getType()->as<Type::Class>();
-                if (classType != nullptr) {
-                    auto methodInfo = classType->getMethodInfo(functionAst->name.value());
-                    assert(methodInfo.has_value());
-                    bool isInterface = methodInfo.value().isInterfaceMethod;
-                    if (isInterface) {
-                        printType(classType);
-                        printSpace();
-                        printSymbol(Symbol::Mul);
-                        printSpace();
-                        printIdentifier(symbols::KwThis);
-                        printSpace();
-                        printSymbol(Symbol::Assign);
-                        printSpace();
-                        printKeyword(Symbol::KwCast);
-                        printSymbol(Symbol::Lt);
-                        printType(classType);
-                        printSymbol(Symbol::Mul);
-                        printSymbol(Symbol::Gt);
-                        printSymbol(Symbol::ParOpen);
-                        printIdentifier(symbols::ThisInterface);
-                        printSymbol(Symbol::ParClose);
-                    }
-                }
-            } else if (functionAst->isConstructor()) {
+            if (functionAst->isClassConstructor()) {
                 auto classType = classAst->getType()->as<Type::Class>();
                 printNewline();
                 if (!classConstructorIsIniting) {
@@ -190,7 +165,7 @@ namespace tinycplus {
                 types_.findEachClassType(classTypes);
                 printComment(" === Initializing virtual tables === ");
                 for (auto * classType : classTypes) {
-                    printIdentifier(classType->getVirtualTable()->initName);
+                    printIdentifier(classType->setupName);
                     printSymbol(Symbol::ParOpen);
                     printSymbol(Symbol::ParClose);
                     printSymbol(Symbol::Semicolon);
@@ -273,8 +248,8 @@ namespace tinycplus {
 
 
     void Transpiler::visit(ASTFunDecl * ast) {
-        if (ast->isMethod()) printMethod(ast);
-        else if (ast->isConstructor()) printConstructor(ast);
+        if (ast->isClassMethod()) printMethod(ast);
+        else if (ast->isClassConstructor()) printConstructor(ast);
         else printFunction(ast);
     }
 
@@ -309,52 +284,41 @@ namespace tinycplus {
 
     void Transpiler::visit(ASTInterfaceDecl * ast) {
         pushAst(ast);
-        // validateName(ast->name);
-        // auto interfaceType = ast->getType()->as<Type::Interface>();
-        // printer_.newline();
-        // /// TODO:
-        // /// Interface ID (comment)
-        // printComment(STR("ID: "), true);
-        // /// Interface Impl struct
-        // /// Interface View struct
-        // /// Interface View make function
-
-        // // * header
-        // printKeyword(Symbol::KwStruct);
-        // printSpace();
-        // printIdentifier(ast->name.name());
-        // // ** body begins
-        // printSymbol(Symbol::CurlyOpen);
-        // printer_.indent();
-        // /// TODO: finish tranpilation code!
-        // // ** vtable pointer declaration
-        // printer_.newline();
-        // printType(classType->isAbstract() ? types_.getTypeVoid() : vtableType);
-        // printSymbol(Symbol::Mul);
-        // printSpace();
-        // printIdentifier(symbols::VTable);
-        // printSymbol(Symbol::Semicolon);
-        // // ** class fields declaration
-        // std::vector<FieldInfo> classFields;
-        // classType->collectFieldsOrdered(classFields);
-        // for (auto & i : classFields) {
-        //     printer_.newline();
-        //     visitChild(i.ast);
-        //     printSymbol(Symbol::Semicolon);
-        // }
-        // // ** class declaration closed
-        // printer_.dedent();
-        // printer_.newline();
-        // printSymbol(Symbol::CurlyClose);
-        // printSymbol(Symbol::Semicolon);
-        // printer_.newline();
-        // // ** methods declaration
-        // for (auto & i : ast->methods) {
-        //     if (i->isAbstract()) continue;
-        //     printer_.newline();
-        //     visitChild(i.get());
-        // }
-        // printer_.newline();
+        validateName(ast->name);
+        auto type = ast->getType()->as<Type::Interface>();
+        printNewline();
+        // * interface ID (comment)
+        printComment(STR(" --- interface " << type->name.name() << " --- id: " << type->getId()), true);
+        // * interface method function pointer types
+        std::vector<FieldInfo> implFields;
+        type->vtable->collectFieldsOrdered(implFields);
+        for (auto & it : implFields) {
+            printFunctionPointerType(it.type->as<Type::Alias>());
+        }
+        printNewline();
+        // * interface Impl struct
+        printKeyword(Symbol::KwStruct);
+        printSpace();
+        printIdentifier(type->implStructName);
+        printSpace();
+        printScopeOpen();
+        printFields(implFields);
+        printScopeClose(true);
+        // * interface
+        printKeyword(Symbol::KwStruct);
+        printSpace();
+        printIdentifier(type->name);
+        printSpace();
+        printScopeOpen();
+        {
+            // ** this fields
+            printField(types_.getOrCreatePointerType(types_.getTypeVoid()), symbols::InterfaceTargetAsField);
+            // ** impl field
+            printField(type->implStructName, symbols::InterfaceImplAsField);
+        }
+        printScopeClose(true);
+        /// TODO:
+        // * interface function
         popAst();
     }
 
@@ -392,7 +356,7 @@ namespace tinycplus {
             printSpace();
             printSymbol(Symbol::Mul);
             printSpace();
-            printIdentifier(symbols::VTable);
+            printIdentifier(symbols::VirtualTableAsField);
             printSymbol(Symbol::Semicolon);
             // ** class fields declaration
             std::vector<FieldInfo> classFields;
@@ -407,16 +371,14 @@ namespace tinycplus {
             printSymbol(Symbol::CurlyClose);
             printSymbol(Symbol::Semicolon);
             printer_.newline();
+
             // ** methods declaration
             for (auto & i : ast->methods) {
                 if (i->isAbstract()) continue;
                 printer_.newline();
                 visitChild(i.get());
             }
-            printer_.newline();
-            if (!classType->isAbstract()) {
-                printVTableInitFunction(classType);
-            }
+
             // ** constructor instance make declarations
             if (ast->constructors.size() == 0) {
                 printDefaultConstructor(classType);
@@ -427,13 +389,28 @@ namespace tinycplus {
                     printer_.newline();
                     visitChild(i.get());
                 }
-                // ** constructor instance init declarations
                 classConstructorIsIniting = true;
+                // ** constructor instance init declarations
                 for (auto & i : ast->constructors) {
                     printer_.newline();
                     visitChild(i.get());
                 }
             }
+
+            if (!classType->isAbstract()) {
+                // ** all implemented interface instances
+                for (auto & it : classType->interfaces) {
+                    printField(it.second->implStructName, getClassImplInstanceName(it.second, classType));
+                    printNewline();
+                }
+
+                // ** setup function declaration
+                printNewline();
+                printClassSetupFunction(classType);
+            }
+
+            // ** "cast to class" function
+            printCastToClassFunction(classType);
         }
         popAst();
     }
@@ -672,10 +649,7 @@ namespace tinycplus {
 
     void Transpiler::visit(ASTMember * ast) {
         pushAst(ast);
-        if (ast->member->as<ASTCall>()) { // method call
-            /// WARNING: function pointer is allowed only in root context,
-            ///       however if it will change and data structures become allowed to use them
-            ///       then a redesign must take place.
+        if (ast->member->as<ASTCall>()) {
             visitChild(ast->member.get());
         } else {
             visitChild(ast->base.get());
@@ -686,58 +660,18 @@ namespace tinycplus {
     }
 
     void Transpiler::visit(ASTCall * ast) {
-        auto parentBlock = peekAst()->as<ASTBlock>();
         auto * member = peekAst()->as<ASTMember>();
         pushAst(ast);
-        auto * ident = ast->function->as<ASTIdentifier>();
-        if (member != nullptr && !ident->getType()->isPointer()) { // method call
-            auto targetType = member->base->getType();
-            auto * classType = targetType->getCore<Type::Class>();
-            auto methodInfo = classType->getMethodInfo(ident->name).value();
-            auto * targetClassType = methodInfo.type->argType(0)->getCore<Type::Class>();
-            auto baseAsIdent = member->base->as<ASTIdentifier>();
-            if (methodInfo.ast->isVirtualized() && (baseAsIdent == nullptr || baseAsIdent->name != symbols::KwBase)) {
-                visitChild(member->base.get());
-                printSymbol(targetType->isPointer() ? Symbol::ArrowR : Symbol::Dot);
-                printIdentifier(symbols::VTable);
-                printSymbol(Symbol::ArrowR);
-                printIdentifier(ident->name);
+        if (member != nullptr) { // method call
+            auto baseType = member->base->getType();
+            // std::cout << "DEBUG: member base type is (" << baseType->toString() << ")" << std::endl;
+            if (auto * classType = baseType->getCore<Type::Class>()) {
+                printClassMethodCall(member, ast, classType);
+            } else if (auto * interfaceType = baseType->getCore<Type::Interface>()) {
+                printInterfaceMethodCall(member, ast, interfaceType);
             } else {
-                // direct call
-                printIdentifier(methodInfo.fullName);
+                printFunctionPointerCall(member, ast);
             }
-            // * arguments
-            printSymbol(Symbol::ParOpen);
-            {
-                // * target as the first argument
-                if (classType != targetClassType) {
-                    // downcasts because method belongs to base class
-                    printKeyword(Symbol::KwCast);
-                    printSymbol(Symbol::Lt);
-                    printType(targetClassType->toString());
-                    printType(Symbol::Mul);
-                    printSymbol(Symbol::Gt);
-                    printSymbol(Symbol::ParOpen);
-                    if (member->op == Symbol::Dot) {
-                        printSymbol(Symbol::BitAnd);
-                    }
-                    visitChild(member->base.get());
-                    printSymbol(Symbol::ParClose);
-                } else {
-                    // no cast
-                    if (member->op == Symbol::Dot) {
-                        printSymbol(Symbol::BitAnd);
-                    }
-                    visitChild(member->base.get());
-                }
-                // * the rest of arguments
-                for(auto & arg : ast->args) {
-                    printSymbol(Symbol::Comma);
-                    printSpace();
-                    visitChild(arg.get());
-                }
-            }
-            printSymbol(Symbol::ParClose);
         } else { // function or global function pointer type variable call
             auto * classType = ast->function->getType()->as<Type::Class>();
             if (classType != nullptr) {
@@ -756,9 +690,6 @@ namespace tinycplus {
                 }
             }
             printSymbol(Symbol::ParClose);
-        }
-        if (parentBlock != nullptr) {
-            printSymbol(Symbol::Semicolon);
         }
         popAst();
     }

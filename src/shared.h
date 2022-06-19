@@ -21,8 +21,9 @@ namespace tinycplus {
 
     enum class FunctionKind {
         None,
-        Method,
-        Constructor
+        ClassMethod,
+        InterfaceMethod,
+        ClassConstructor
     };
 
 
@@ -38,10 +39,6 @@ namespace tinycplus {
     private:
         std::stringstream buffer_;
         bool isClosed_;
-    public:
-        SymbolBuilder(bool isClosed) : isClosed_{isClosed} {
-            buffer_ << "_";
-        }
     public:
         SymbolBuilder & add(const Symbol & symbol) {
             buffer_ << symbol.name();
@@ -84,7 +81,35 @@ namespace tinycplus {
         static Symbol KwAccessPublic {"public"};
         static Symbol KwAccessPrivate {"private"};
         static Symbol KwAccessProtected {"protected"};
+        static Symbol KwNull {"null"};
+
+        static Symbol ClassMakeConstructorPrefix {"_Cmake_"};
+        static Symbol ClassInitConstructorPrefix {"_Cinit_"};
+        static Symbol ClassCastToClassPrefix {"_CcastC_"};
+        static Symbol ClassCastToInterfacePrefix {"_CcastI_"};
+        static Symbol ClassMethodPrefix {"_Cfunc_"};
+        static Symbol ClassMethodFuncTypePrefix {"_Cfuncptr_"}; // prefix for function pointer type of virtual table member.
+        static Symbol ClassInterfaceImplInstPrefix {"_Cimpl_"};
+        static Symbol ClassSetupFunctionPrefix {"_Csetup_"};
+
+        static Symbol VirtualTableTypePrefix {"_VTtype_"};     // prefix of the virtual table struct
+        static Symbol VirtualTableInstancePrefix {"_VTinst_"}; // prefix for global virtual table instance
+
+        static Symbol InterfaceImplTypePrefix {"_Iimpl_"};
+        static Symbol InterfaceMethodFuncTypePrefix {"_Ifunc_"};
+
         static Symbol Main {"main"}; // main function name
+        static Symbol VirtualTableAsField {"_vt"}; // name for class field with vtable pointer type.
+        static Symbol InterfaceImplAsField {"impl"};
+        static Symbol InterfaceTargetAsField = KwThis;
+        static Symbol HiddenThis {"_this"}; // used in constructors as "this" of value type.
+
+        // old: disabled or depricated
+        static Symbol ThisInterface {"_face"}; // instead of "this" for interface methods' first argument
+        static Symbol NoEntry{"_program_entry"};
+        static Symbol ObjectCast {"supercast"}; // method to cast any object into any other object type     .
+        extern Symbol Entry;
+
 
         bool static isParsebleKeyword(Symbol const & s) {
             return s == KwClass
@@ -104,62 +129,59 @@ namespace tinycplus {
             return false;
         }
 
-        static tinycplus::SymbolBuilder user() {
-            return tinycplus::SymbolBuilder{false};
+        static tinycplus::SymbolBuilder start() {
+            return tinycplus::SymbolBuilder{};
         };
 
-        static tinycplus::SymbolBuilder system() {
-            return tinycplus::SymbolBuilder{true};
-        }
+        // // ** virtual tables **
 
-        static Symbol HiddenThis {"_this"};
-        static Symbol ThisInterface {"_face"}; // instead of "this" for interface methods' first argument
-        static Symbol VTable {"_vt"}; // name for class field with vtable pointer type.
-        static Symbol NoEntry{"_program_entry"};
-        static Symbol ObjectCast {"supercast"}; // method to cast any object into any other object type     .
-        extern Symbol Entry;
+        // static Symbol makeVTableStructName(Symbol className) {
+        //     return system().add("VT_").add(className).end();
+        // }
 
-        // ** virtual tables **
+        // static Symbol makeVTableInitFuncName(Symbol className) {
+        //     return system().add("VTinit_").add(className).end();
+        // }
 
-        static Symbol makeVTableStructName(Symbol className) {
-            return system().add("VT_").add(className).end();
-        }
+        // static Symbol makeVTableInstance(Symbol className) {
+        //     return system().add("VTinst_").add(className).end();
+        // }
 
-        static Symbol makeVTableInitFuncName(Symbol className) {
-            return system().add("VTinit_").add(className).end();
-        }
-
-        static Symbol makeVTableInstance(Symbol className) {
-            return system().add("VTinst_").add(className).end();
-        }
-
-        // ** interfaces **
+        // // ** interfaces **
 
         static Symbol makeImplStructName(Symbol interfaceName) {
-            return system().add("I_").add(interfaceName).end();
+            return start().add(InterfaceImplTypePrefix).add(interfaceName).end();
         }
 
-        static Symbol makeImplInitFuncName(Symbol interfaceName, Symbol className) {
-            return system()
-                .add("Iinit_").add(interfaceName)
-                .add("_").add(className).end();
+        static Symbol makeInterfaceMethodFuncType(Symbol methodName) {
+            return symbols::start().add(symbols::InterfaceMethodFuncTypePrefix).add(methodName).end();
         }
 
-        static Symbol makeImplInstanceName(Symbol interfaceName, Symbol className) {
-            return system()
-                .add("Iinst_").add(interfaceName)
-                .add("_").add(className).end();
+        static Symbol makeClassMethodFuncType(Symbol className, Symbol methodName) {
+            return symbols::start().add(symbols::ClassMethodFuncTypePrefix).add(className).add("_").add(methodName).end();
         }
 
-        static Symbol makeInterMakeFuncName(Symbol interfaceName, Symbol className) {
-            return system()
-                .add("Imake_").add(interfaceName)
-                .add("_").add(className).end();
-        }
+        // static Symbol makeImplInitFuncName(Symbol interfaceName, Symbol className) {
+        //     return system()
+        //         .add("Iinit_").add(interfaceName)
+        //         .add("_").add(className).end();
+        // }
 
-        static Symbol makeGetInterImpl(Symbol className) {
-            return system().add("Cgeti_").add(className).end();
-        }
+        // static Symbol makeImplInstanceName(Symbol interfaceName, Symbol className) {
+        //     return system()
+        //         .add("Iinst_").add(interfaceName)
+        //         .add("_").add(className).end();
+        // }
+
+        // static Symbol makeInterMakeFuncName(Symbol interfaceName, Symbol className) {
+        //     return system()
+        //         .add("Imake_").add(interfaceName)
+        //         .add("_").add(className).end();
+        // }
+
+        // static Symbol makeGetInterImpl(Symbol className) {
+        //     return system().add("Cgeti_").add(className).end();
+        // }
 
     } // namespace symbols
 

@@ -127,6 +127,7 @@ namespace tinycplus {
         inline void printScopeOpen() {
             printSymbol(Symbol::CurlyOpen);
             printIndent();
+            printNewline();
         }
         inline void printScopeClose(bool isSemicolonTerminated) {
             printDedent();
@@ -137,15 +138,31 @@ namespace tinycplus {
             }
             printNewline();
         }
+
+        inline void printField(Symbol type, Symbol name) {
+            printNewline();
+            printType(type);
+            printSpace();
+            printIdentifier(name);
+            printSymbol(Symbol::Semicolon);
+        }
+
+        inline void printField(Type * type, Symbol name) {
+            printField(Symbol{type->toString()}, name);
+        }
+
         inline void printFields(std::vector<FieldInfo> & fields) {
             for (auto & field : fields) {
-                printNewline();
-                printType(field.type);
-                printSpace();
-                printIdentifier(field.name);
-                printSymbol(Symbol::Semicolon);
+                printField(field.type->toString(), field.name);
             }
         }
+
+        Symbol getClassImplInstanceName(Type::Interface * interfaceType, Type::Class * classType) {
+            return symbols::start().add(symbols::ClassInterfaceImplInstPrefix)
+                .add(classType->name).add("_").add(interfaceType->name)
+                .end();
+        }
+
         void printFunctionPointerType(Type::Alias * type) {
             auto * functionType = type->base()->getCore<Type::Function>();
             assert(functionType != nullptr && "oh no, it is not a function pointer type alias");
@@ -173,6 +190,7 @@ namespace tinycplus {
             printSymbol(Symbol::Semicolon);
             printNewline();
         }
+
         void printVTableStruct(Type::Class * classType) {
             if (classType->isAbstract()) {
                 return;
@@ -198,28 +216,27 @@ namespace tinycplus {
             printNewline();
             printNewline();
         }
-        void printVTableInitFunction(Type::Class * classType) {
+
+        void printClassSetupFunction(Type::Class * classType) {
             auto vtableType = classType->getVirtualTable();
-            if (vtableType == nullptr) return;
-            auto returnType = types_.getTypeVoid();
             // * return type
-            printType(returnType);
+            printType(types_.getTypeVoid());
             printSpace();
             // * name
-            printIdentifier(vtableType->initName);
+            printIdentifier(classType->setupName);
             // * arguments
             printSymbol(Symbol::ParOpen);
             printSymbol(Symbol::ParClose);
             printSpace();
             // * body start
-            printSymbol(Symbol::CurlyOpen);
-            printIndent();
+            printScopeOpen();
             {
+                // ** sets fileds of globale vtable instance
                 std::vector<FieldInfo> vtableFields;
                 vtableType->collectFieldsOrdered(vtableFields);
+                printComment(STR("setup of vtable instance"));
                 for (auto & field : vtableFields) {
                     // e.g ~~> this.vtable->functionPtr = function;
-                    printNewline();
                     printIdentifier(vtableType->instanceName);
                     printSymbol(Symbol::Dot);
                     printIdentifier(field.name);
@@ -230,60 +247,102 @@ namespace tinycplus {
                     printSymbol(Symbol::BitAnd);
                     printIdentifier(methodInfo.fullName);
                     printSymbol(Symbol::Semicolon);
+                    printNewline();
+                }
+                printNewline();
+                // ** set fields of each interfae implementation
+                if (classType->interfaces.size() > 0) {
+                    printComment(STR("setup of interface implementation instances"));
+                }
+                for (auto & face : classType->interfaces) {
+                    auto * interfaceType = face.second;
+                    auto implInstance = getClassImplInstanceName(interfaceType, classType);
+                    for (auto & method : interfaceType->methods_) {
+                        
+                        auto classMethod = classType->getMethodInfo(method.first).value();
+                        printNewline();
+                        printIdentifier(implInstance);
+                        printSymbol(Symbol::Dot);
+                        printIdentifier(method.first);
+                        printSpace();
+                        printSymbol(Symbol::Assign);
+                        printSpace();
+                        printSymbol(Symbol::KwCast);
+                        printSymbol(Symbol::Lt);
+                        printType(method.second.ptrType);
+                        printSymbol(Symbol::Gt);
+                        printSymbol(Symbol::ParOpen);
+                        printSymbol(Symbol::BitAnd);
+                        printIdentifier(classMethod.fullName);
+                        printSymbol(Symbol::ParClose);
+                        printSymbol(Symbol::Semicolon);
+                    }
                 }
             }
             // * body end
-            printDedent();
-            printNewline();
-            printSymbol(Symbol::CurlyClose);
-            printNewline();
+            printScopeClose(false);
             printNewline();
         }
-        void printImplStruct(Type::Interface * interfaceType, Type::Class * classType) {
-            // printKeyword(Symbol::KwStruct);
-            // printSpace();
-            // printIdentifier(generator_.getImplStruct(interfaceType, classType));
+
+        void printCastToClassFunction(Type::Class * classType) {
+            auto localInstName = Symbol{"inst"};
+            auto localIdName = Symbol{"id"};
+            // * return type
+            printType(types_.getTypeVoid());
+            printSymbol(Symbol::Mul);
+            printSpace();
+            // * name
+            printIdentifier(classType->classCastName);
+            // * arguments
+            printSymbol(Symbol::ParOpen);
+            printType(types_.getTypeVoid());
+            printSymbol(Symbol::Mul);
+            printSpace();
+            printIdentifier(localInstName);
+            printSymbol(Symbol::Comma);
+            printType(types_.getTypeInt());
+            printSpace();
+            printIdentifier(localIdName);
+            printSymbol(Symbol::ParClose);
+            printSpace();
+            // * body start
+            printScopeOpen();
+            {
+                // ** switches between base class ids
+                printKeyword(Symbol::KwSwitch);
+                printSymbol(Symbol::ParOpen);
+                printIdentifier(localIdName);
+                printSymbol(Symbol::ParClose);
+                printScopeOpen();
+                for (auto * base = classType->getBase(); base != nullptr; base = base->getBase()) {
+                    // ** class index case
+                    printKeyword(Symbol::KwCase);
+                    printSpace();
+                    printNumber(base->getId());
+                    printSymbol(Symbol::Colon);
+                    printSpace();
+                    printKeyword(Symbol::KwReturn);
+                    printSpace();
+                    printSymbol(localInstName);
+                    printSymbol(Symbol::Semicolon);
+                    printNewline();
+                }
+                // ** default case
+                printKeyword(Symbol::KwDefault);
+                printSymbol(Symbol::Colon);
+                printSpace();
+                printKeyword(Symbol::KwReturn);
+                printSpace();
+                printSymbol(symbols::KwNull);
+                printSymbol(Symbol::Semicolon);
+                printScopeClose(false);
+            }
+            // * body end
+            printScopeClose(false);
+            printNewline();
         }
-        void printInitFunction(Type::Interface * interfaceType, Type::Class * classType) {
-            // // * return type
-            // printType(types_.getTypeVoid());
-            // printSpace();
-            // // * name
-            // printIdentifier(generator_.getImplStruct(interfaceType ,classType));
-            // // * arguments
-            // printSymbol(Symbol::ParOpen);
-            // printSymbol(Symbol::ParClose);
-            // printSpace();
-            // // * body start
-            // printSymbol(Symbol::CurlyOpen);
-            // printIndent();
-            // {
-            //     std::vector<FieldInfo> vtableFields;
-            //     vtableType->collectFieldsOrdered(vtableFields);
-            //     for (auto & field : vtableFields) {
-            //         // e.g ~~> this.vtable->functionPtr = function;
-            //         printNewline();
-            //         printIdentifier(generator_.getInstance(vtableType));
-            //         printSymbol(Symbol::Dot);
-            //         printIdentifier(field.name);
-            //         printSpace();
-            //         printSymbol(Symbol::Assign);
-            //         printSpace();
-            //         auto methodInfo = classType->getMethodInfo(field.name).value();
-            //         printSymbol(Symbol::BitAnd);
-            //         printIdentifier(methodInfo.fullName);
-            //         printSymbol(Symbol::Semicolon);
-            //     }
-            // }
-            // // * body end
-            // printDedent();
-            // printNewline();
-            // printSymbol(Symbol::CurlyClose);
-            // printNewline();
-            // printNewline();
-        }
+
         void printDefaultConstructor(Type::Class * classType) {
-            if (classType)
             // * return type
             printType(classType);
             printSpace();
@@ -339,12 +398,12 @@ namespace tinycplus {
             printSymbol(Symbol::CurlyClose);
             printNewline();
         }
-        
+
         void printVTableInstanceAssignment(Type::Class * classType, bool asPointer) {
             auto * vtable = classType->getVirtualTable();
             printIdentifier(symbols::KwThis);
             printSymbol(asPointer ? Symbol::ArrowR : Symbol::Dot);
-            printIdentifier(symbols::VTable);
+            printIdentifier(symbols::VirtualTableAsField);
             printSpace();
             printSymbol(Symbol::Assign);
             printSpace();
@@ -437,7 +496,6 @@ namespace tinycplus {
             printSpace();
             // * method name
             auto classType = classParent->getType()->as<Type::Class>();
-            bool isInterfaceMethod = classType->getMethodInfo(name).value().isInterfaceMethod;
             auto info = classType->getMethodInfo(name).value();
             registerDeclaration(info.fullName, name, 1);
             printIdentifier(info.fullName);
@@ -447,10 +505,7 @@ namespace tinycplus {
             printType(classParent->name.name());
             printSymbol(Symbol::Mul);
             printSpace();
-            printIdentifier(isInterfaceMethod
-                ? symbols::ThisInterface
-                : symbols::KwThis
-            );
+            printIdentifier(symbols::KwThis);
             if (ast->args.size() > 0) {
                 printSymbol(Symbol::Comma);
                 printSpace();
@@ -473,6 +528,88 @@ namespace tinycplus {
                 printSymbol(Symbol::Semicolon);
             }
             popAst();
+        }
+
+        void printFunctionPointerCall(ASTMember * member, ASTCall * call) {
+            visitChild(member->base.get());
+            printSymbol(member->op);
+            visitChild(call);
+        }
+
+        void printInterfaceMethodCall(ASTMember * member, ASTCall * call, Type::Interface * interfaceType) {
+            auto methodName = call->function->as<ASTIdentifier>();
+            auto baseAsIdent = member->base->as<ASTIdentifier>();
+            visitChild(member->base.get());
+            printSymbol(Symbol::Dot);
+            printIdentifier(symbols::InterfaceImplAsField);
+            printSymbol(Symbol::ArrowR);
+            printIdentifier(methodName->name);
+            // * arguments
+            printSymbol(Symbol::ParOpen);
+            {
+                visitChild(member->base.get());
+                printSymbol(Symbol::Dot);
+                printIdentifier(symbols::InterfaceTargetAsField);
+                // * the rest of arguments
+                for(auto & arg : call->args) {
+                    printSymbol(Symbol::Comma);
+                    printSpace();
+                    visitChild(arg.get());
+                }
+            }
+            printSymbol(Symbol::ParClose);
+        }
+
+        void printClassMethodCall(ASTMember * member, ASTCall * call, Type::Class * classType) {
+            bool isPointerAccess = member->op == Symbol::ArrowR;
+            auto methodName = call->function->as<ASTIdentifier>();
+            auto methodInfo = classType->getMethodInfo(methodName->name).value();
+            auto * targetClassType = methodInfo.type->argType(0)->getCore<Type::Class>();
+            auto baseAsIdent = member->base->as<ASTIdentifier>();
+            bool isBaseCall = baseAsIdent != nullptr && baseAsIdent->name != symbols::KwBase;
+            bool methodIsVirtual = methodInfo.ast->isVirtualized();
+            if (methodIsVirtual && isBaseCall) {
+                visitChild(member->base.get());
+                printSymbol(isPointerAccess ? Symbol::ArrowR : Symbol::Dot);
+                printIdentifier(symbols::VirtualTableAsField);
+                printSymbol(Symbol::ArrowR);
+                printIdentifier(methodName->name);
+            } else {
+                // direct call
+                printIdentifier(methodInfo.fullName);
+            }
+            // * arguments
+            printSymbol(Symbol::ParOpen);
+            {
+                // * target as the first argument
+                if (classType != targetClassType) {
+                    // downcasts because method belongs to base class
+                    printKeyword(Symbol::KwCast);
+                    printSymbol(Symbol::Lt);
+                    printType(targetClassType->toString());
+                    printType(Symbol::Mul);
+                    printSymbol(Symbol::Gt);
+                    printSymbol(Symbol::ParOpen);
+                    if (member->op == Symbol::Dot) {
+                        printSymbol(Symbol::BitAnd);
+                    }
+                    visitChild(member->base.get());
+                    printSymbol(Symbol::ParClose);
+                } else {
+                    // no cast
+                    if (member->op == Symbol::Dot) {
+                        printSymbol(Symbol::BitAnd);
+                    }
+                    visitChild(member->base.get());
+                }
+                // * the rest of arguments
+                for(auto & arg : call->args) {
+                    printSymbol(Symbol::Comma);
+                    printSpace();
+                    visitChild(arg.get());
+                }
+            }
+            printSymbol(Symbol::ParClose);
         }
     public:
         void visit(AST * ast) override;

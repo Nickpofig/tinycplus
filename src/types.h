@@ -198,7 +198,6 @@ namespace tinycplus {
         Symbol fullName;
         Type::Function * type;
         ASTFunDecl * ast;
-        bool isInterfaceMethod;
     };
 
 
@@ -296,34 +295,6 @@ namespace tinycplus {
 
 
 
-    /** Represents TinyC+ interfaces
-     * 
-     */
-    class Type::Interface : public Type::Complex {
-    public:
-        const Symbol name;
-        const Symbol implStructName;
-    private:
-        int id_;
-    public:
-        Interface(Symbol name)
-            :name{name}
-            ,implStructName{symbols::makeImplStructName(name)}
-        {
-            static int id = 0;
-            id_ = id;
-            id++;
-        }
-    private:
-        friend class TypeChecker;
-        void toStream(std::ostream & s) const override {
-            // s << symbols::PrefixInterfaceViewStruct.name() << name;
-        }
-    }; // tinycplus::Type::Interface
-
-
-
-
     class Type::VTable : public Type::Complex {
     public:
         const Symbol className;    // class name
@@ -333,9 +304,9 @@ namespace tinycplus {
     public:
         VTable(Symbol className)
             :className{className}
-            ,typeName{STR("_VTtype_" << className.name())}
-            ,instanceName{STR("_VTinst_" << className.name())}
-            ,initName{STR("_VTinit_" << className.name())}
+            ,typeName{symbols::start().add(symbols::VirtualTableTypePrefix).add(className).end()}
+            ,instanceName{symbols::start().add(symbols::VirtualTableInstancePrefix).add(className).end()}
+            ,initName{symbols::start().add(instanceName).add("init").end()}
         { }
     public:
         // bool requiresImplicitConstruction() const override {
@@ -361,25 +332,81 @@ namespace tinycplus {
 
 
 
+    /** Represents TinyC+ interfaces
+     * 
+     */
+    class Type::Interface : public Type::Complex {
+    public:
+        struct MethodInfo {
+            Type::Function * type;
+            Type::Alias * ptrType;
+        };
+    public:
+        const Symbol name;
+        const Symbol implStructName;
+        std::unordered_map<Symbol, MethodInfo> methods_;
+        Type::VTable * vtable;
+    private:
+        int id_;
+    public:
+        Interface(Symbol name, Type::VTable * vtable)
+            :name{name}
+            ,vtable{vtable}
+            ,implStructName{symbols::makeImplStructName(name)}
+        {
+            static int id = 0;
+            id_ = id;
+            id++;
+        }
+    public:
+        int getId() const { return id_; }
+        void addMethod(Symbol name, Type::Function * type, Type::Alias * ptrType) {
+            assert(type != nullptr && methods_.find(name) == methods_.end());
+            methods_.insert({name, MethodInfo {type, ptrType}});
+        }
+    private:
+        friend class TypeChecker;
+        void toStream(std::ostream & s) const override {
+            s << name.name();
+        }
+        std::optional<Type::Function*> getMethod(Symbol name) {
+            auto result = methods_.find(name);
+            if (result == methods_.end()) {
+                return std::nullopt;
+            } else {
+                return result->second.type;
+            }
+        }
+    }; // tinycplus::Type::Interface
+
+
+
+
     class Type::Class : public Type::Complex {
     public:
         const Symbol name;
         const Symbol makeName;
         const Symbol initName;
+        const Symbol setupName;
+        const Symbol classCastName;
+        const Symbol interfaceCastName;
         std::vector<Type::Function*> constructors;
+        std::unordered_map<Symbol, Type::Interface * > interfaces;
     private:
         int id_;
         Type::Class * base_ = nullptr;
         Type::VTable * vtable_ = nullptr;
         std::unordered_map<Symbol, MethodInfo> functions_;
-        std::unordered_map<Symbol, Type::Interface * > interfaces_;
         bool isAbstract_ = false;
     public:
         Class(Symbol name, Type::VTable * vtable)
             :name{name}
             ,vtable_{vtable}
-            ,makeName{Symbol(STR("_Cmake_" << name.name()))}
-            ,initName{Symbol(STR("_Cinit_" << name.name()))}
+            ,makeName{symbols::start().add(symbols::ClassMakeConstructorPrefix).add(name).end()}
+            ,initName{symbols::start().add(symbols::ClassInitConstructorPrefix).add(name).end()}
+            ,setupName{symbols::start().add(symbols::ClassSetupFunctionPrefix).add(name).end()}
+            ,classCastName{symbols::start().add(symbols::ClassCastToClassPrefix).add(name).end()}
+            ,interfaceCastName{symbols::start().add(symbols::ClassCastToInterfacePrefix).add(name).end()}
         {
             static int id = 0;
             id_ = id;
@@ -397,7 +424,7 @@ namespace tinycplus {
             base_->getVirtualTable()->copyFieldsTo(vtable_);
         }
         void implements(Type::Interface * type) {
-            interfaces_.insert_or_assign(type->name, type);
+            interfaces.insert_or_assign(type->name, type);
         }
         Type::VTable * getVirtualTable() const {
             return vtable_;
@@ -417,7 +444,7 @@ namespace tinycplus {
             return false;
         }
         bool isInterfaceMethod(Symbol name) {
-            for (auto & it : interfaces_) {
+            for (auto & it : interfaces) {
                 if (it.second->getFieldInfo(name).has_value()) {
                     return true;
                 }
@@ -453,7 +480,7 @@ namespace tinycplus {
         bool isAbstract() const {
             return isAbstract_;
         }
-        void registerMethod(Symbol name, Type::Function * type, ASTFunDecl * ast, bool isInterfaceMethod) {
+        void registerMethod(Symbol name, Type::Function * type, ASTFunDecl * ast) {
             this->isAbstract_ |= ast->isAbstract();
             if (hasMethod(name, false)) {
                 throwMemberIsAlreadyDefined(name, ast);
@@ -469,21 +496,20 @@ namespace tinycplus {
                 };
             }
             bool isVirtual = ast->isVirtualized();
-            auto fullName = symbols::system()
-                .add("CM_")
-                .add(toString())
+            auto fullName = symbols::start()
+                .add(symbols::ClassMethodPrefix)
+                .add(this->name)
                 .add("_")
-                // .add(isVirtual ? "__virtual__" : "__")
                 .add(name)
                 .end();
-            functions_.insert({ name, MethodInfo{name, fullName, type, ast, isInterfaceMethod} });
+            functions_.insert({ name, MethodInfo{name, fullName, type, ast} });
         }
         void addInterfaceType(Type::Interface * interfaceType) {
-            interfaces_[interfaceType->name] = interfaceType;
+            interfaces.insert({interfaceType->name, interfaceType});
         }
         Type::Interface * getInterfaceType(Symbol & name) {
-            auto it = interfaces_.find(name);
-            if (it == interfaces_.end()) {
+            auto it = interfaces.find(name);
+            if (it == interfaces.end()) {
                 throw std::runtime_error("[ERROR:Types] ");
             }
             return it->second;

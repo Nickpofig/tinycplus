@@ -28,10 +28,11 @@ namespace tinycplus {
         template<typename T> T * as() {
             return dynamic_cast<T*>(this);
         }
-        virtual void print(ASTPrettyPrinter & p) const {
-            /// NOTE: In this transpiler [print] function of ASTBase will not be used
-            throw std::runtime_error("AST pretty print is not implemented");
-        };
+        virtual void print(ASTPrettyPrinter & p) const = 0;
+        // {
+        //     /// NOTE: In this transpiler [print] function of ASTBase will not be used
+        //     throw std::runtime_error("AST pretty print is not implemented");
+        // };
     // -----Type support----
     private:
         Type * type_ = nullptr;
@@ -71,6 +72,9 @@ namespace tinycplus {
         }
     protected:
         void accept(ASTVisitor * v) override;
+        void print(ASTPrettyPrinter & p) const override {
+            p << value;
+        }
     };
 
 
@@ -86,6 +90,9 @@ namespace tinycplus {
         }
     protected:
         void accept(ASTVisitor * v) override;
+        void print(ASTPrettyPrinter & p) const override {
+            p << value;
+        }
     };
 
 
@@ -103,6 +110,10 @@ namespace tinycplus {
             if (s.size() != 1)
                 throw ParserError(STR("Expected single character, but " << s.size() << " characters found in '" << s << "'"), t.location(), false);
             value = s[0];
+        }
+    public:
+        void print(ASTPrettyPrinter & p) const override {
+            p << value;
         }
     protected:
         void accept(ASTVisitor * v) override;
@@ -124,6 +135,10 @@ namespace tinycplus {
         }
     protected:
         void accept(ASTVisitor * v) override;
+    public:
+        void print(ASTPrettyPrinter & p) const override {
+            p << value;
+        }
     };
 
 
@@ -142,6 +157,9 @@ namespace tinycplus {
          */
         bool hasAddress() const override {
             return true;
+        }
+        void print(ASTPrettyPrinter & p) const override {
+            p << name.name();
         }
     protected:
         void accept(ASTVisitor * v) override;
@@ -183,6 +201,11 @@ namespace tinycplus {
             ASTType{t},
             base{std::move(base)} {
         }
+    public:
+        void print(ASTPrettyPrinter & p) const override {
+            base->print(p);
+            p << "*";
+        }
     protected:
         void buildStringRepresentation(std::ostream & s) const override {
             toString(base.get(), s);
@@ -204,6 +227,11 @@ namespace tinycplus {
             base{std::move(base)},
             size{std::move(size)} {
         }
+    public:
+        void print(ASTPrettyPrinter & p) const override {
+            base->print(p);
+            p << "[]";
+        }
     protected:
         void buildStringRepresentation(std::ostream & s) const override {
             toString(base.get(), s);
@@ -222,6 +250,10 @@ namespace tinycplus {
         ASTNamedType(Token const & t) :
             ASTType{t},
             name{t.valueSymbol()} {
+        }
+    public:
+        void print(ASTPrettyPrinter & p) const override {
+            p << name.name();
         }
     protected:
         void buildStringRepresentation(std::ostream & s) const override {
@@ -249,6 +281,15 @@ namespace tinycplus {
                 ? false
                 : body.back()->hasAddress();
         }
+        void print(ASTPrettyPrinter & p) const override {
+            p.newline();
+            p.indent();
+            for (auto & it : body) {
+                it->print(p); p.newline();
+                std::cout.flush();
+            }
+            p.dedent();
+        }
     protected:
         void accept(ASTVisitor * v) override;
     };
@@ -272,6 +313,12 @@ namespace tinycplus {
     class ASTProgram : public ASTSequence {
     public:
         ASTProgram(Token const & t): ASTSequence{t} { }
+    public:
+        void print(ASTPrettyPrinter & p) const override {
+            for (auto & it : body) {
+                it->print(p); p.newline();
+            }
+        }
     protected:
         void accept(ASTVisitor * v) override;
     };
@@ -280,6 +327,7 @@ namespace tinycplus {
 
 
     enum class AccessMod {
+        None,
         Public,
         Private,
         Protected,
@@ -290,11 +338,29 @@ namespace tinycplus {
         std::unique_ptr<ASTType> type;
         std::unique_ptr<ASTIdentifier> name;
         std::unique_ptr<AST> value;
-        AccessMod accessMod = AccessMod::Public;
+        AccessMod access = AccessMod::None;
     public:
         ASTVarDecl(Token const & t, std::unique_ptr<ASTType> type):
             AST{t},
             type{std::move(type)} {
+        }
+    public:
+        void print(ASTPrettyPrinter & p) const override {
+            switch(access) {
+                case AccessMod::Public: p << "public "; break;
+                case AccessMod::Private: p << "private "; break;
+                case AccessMod::Protected: p << "protected "; break;
+            }
+            p << "variable ("; name->print(p); p << "):";
+            p.newline();
+            p.indent();
+            {
+                p << "type: "; type->print(p); p.newline();
+                if (value) {
+                    p << "value: "; value->print(p); p.newline();
+                }
+            }
+            p.dedent();
         }
     protected:
         void accept(ASTVisitor * v) override;
@@ -313,6 +379,27 @@ namespace tinycplus {
             AST{t},
             name{std::move(name)},
             returnType{std::move(returnType)} {
+        }
+    public:
+        void print(ASTPrettyPrinter & p) const override {
+            p << "function pointer type ("; name->print(p); p << "):";
+            p.newline();
+            p.indent();
+            {
+                p << "return type: "; returnType->print(p); p.newline();
+                if (args.size() > 0) {
+                    p << "args:";
+                    p.indent();
+                    p.newline();
+                    for (auto & it : args) {
+                        it->print(p); p.newline();
+                    }
+                    p.dedent();
+                } else {
+                    p << "[no args]"; p.newline();
+                }
+            }
+            p.dedent();
         }
     protected:
         void accept(ASTVisitor * v) override;
@@ -362,13 +449,67 @@ namespace tinycplus {
             ,typeDecl{std::move(type)}
         { }
     public:
-        bool isMethod() const { return kind == FunctionKind::Method; }
-        bool isConstructor() const { return kind == FunctionKind::Constructor; }
-        bool isPureFunction() const { return !isMethod() && !isConstructor(); }
+        bool isClassMethod() const { return kind == FunctionKind::ClassMethod; }
+        bool isClassConstructor() const { return kind == FunctionKind::ClassConstructor; }
+        bool isInterfaceMethod() const { return kind == FunctionKind::InterfaceMethod; }
+        bool isPureFunction() const { return !isClassMethod() && !isClassConstructor(); }
         bool isAbstract() const { return virtuality == Virtuality::Abstract; }
         bool isVirtual() const { return virtuality == Virtuality::Virtual; }
         bool isOverride() const { return virtuality == Virtuality::Override; }
         bool isVirtualized() const { return isVirtual() || isOverride() || isAbstract(); }
+
+        void print(ASTPrettyPrinter & p) const override {
+            switch (virtuality)
+            {
+                case Virtuality::Abstract: p << "abstract"; break;
+                case Virtuality::Virtual: p << "virtual"; break;
+                case Virtuality::Override: p << "override"; break;
+            }
+            p << " ";
+            switch (kind)
+            {
+                case FunctionKind::ClassMethod: p << "class method"; break;
+                case FunctionKind::ClassConstructor: p << "class constructor"; break;
+                case FunctionKind::InterfaceMethod: p << "interface method"; break;
+                case FunctionKind::None: p << "function"; break;
+            }
+            p << " (" << name->name() << "):";
+            p.newline();
+            p.indent();
+            {
+                p << "return type: "; typeDecl->print(p); p.newline();
+                if (base) {
+                    p << "base ("; base->name->print(p); p << "):";
+                    p.indent();
+                    p.newline();
+                    for (auto & it: base->args) {
+                        it->print(p);
+                        p.newline();
+                    }
+                    p.dedent();
+                }
+                if (args.size() > 0) {
+                    p << "args:";
+                    p.indent();
+                    p.newline();
+                    for (auto & it : args) {
+                        it->print(p); p.newline();
+                    }
+                    p.dedent();
+                } else {
+                    p << "[no args]"; p.newline();
+                    p.newline();
+                }
+                if (body) { 
+                    p << "body: ";
+                    p.indent();
+                    p.newline();
+                    body->print(p);
+                    p.dedent();
+                }
+            }
+            p.dedent();
+        }
     protected:
         void accept(ASTVisitor * v) override;
     };
@@ -384,6 +525,27 @@ namespace tinycplus {
         ASTStructDecl(Token const & t, Symbol name):
             ASTPartialDecl{t},
             name{name} {
+        }
+    public:
+        void print(ASTPrettyPrinter & p) const override {
+            p << "struct (" << name.name() << "):";
+            p.newline();
+            p.indent();
+            {
+                // methods
+                if (fields.size() > 0) {
+                    p << "fields: ";
+                    p.indent();
+                    p.newline();
+                    for (auto & it : fields) {
+                        it->print(p); p.newline();
+                    }
+                    p.dedent();
+                } else {
+                    p << "[no fields]"; p.newline();
+                }
+            }
+            p.dedent();
         }
     protected:
         void accept(ASTVisitor * v) override;
@@ -401,6 +563,27 @@ namespace tinycplus {
             ASTPartialDecl{t},
             name{name}
         { }
+    public:
+        void print(ASTPrettyPrinter & p) const override {
+            p << "interface (" << name.name() << "):";
+            p.newline();
+            p.indent();
+            {
+                // methods
+                if (methods.size() > 0) {
+                    p << "methods: ";
+                    p.indent();
+                    p.newline();
+                    for (auto & it : methods) {
+                        it->print(p); p.newline();
+                    }
+                    p.dedent();
+                } else {
+                    p << "[no methods]"; p.newline();
+                }
+            }
+            p.dedent();
+        }
     protected:
         void accept(ASTVisitor * v) override;
     };
@@ -412,6 +595,7 @@ namespace tinycplus {
     public:
         Symbol name;
         std::unique_ptr<ASTType> baseClass;
+        std::vector<std::unique_ptr<ASTType>> interfaces;
         std::vector<std::unique_ptr<ASTVarDecl>> fields;
         std::vector<std::unique_ptr<ASTFunDecl>> methods;
         std::vector<std::unique_ptr<ASTFunDecl>> constructors;
@@ -419,6 +603,66 @@ namespace tinycplus {
         ASTClassDecl(Token const & t, Symbol name):
             ASTPartialDecl{t},
             name{name} {
+        }
+    public:
+        void print(ASTPrettyPrinter & p) const override {
+            p << "class (" << name.name() << "):";
+            p.newline();
+            p.indent();
+            {
+                if (baseClass) {
+                    p << "base: "; baseClass->print(p); p.newline();
+                }
+                // interfaces
+                if (interfaces.size() > 0) {
+                    p << "interfaces: ";
+                    p.indent();
+                    p.newline();
+                    for (auto & it : interfaces) {
+                        it->print(p); p.newline();
+                    }
+                    p.dedent();
+                } else {
+                    p << "[no interfaces]"; p.newline();
+                }
+                if (constructors.size() > 0) {
+                    // constructors
+                    p << "fields: ";
+                    p.indent();
+                    p.newline();
+                    for (auto & it : fields) {
+                        it->print(p); p.newline();
+                    }
+                    p.dedent();
+                } else {
+                    p << "[no fields]"; p.newline();
+                }
+                if (fields.size() > 0) {
+                    // constructors
+                    p << "constructors: ";
+                    p.indent();
+                    p.newline();
+                    for (auto & it : constructors) {
+                        it->print(p); p.newline();
+                    }
+                    p.dedent();
+                } else {
+                    p << "[no constructors]"; p.newline();
+                }
+                if (methods.size() > 0) {
+                    // methods
+                    p << "methods: ";
+                    p.indent();
+                    p.newline();
+                    for (auto & it : methods) {
+                        it->print(p); p.newline();
+                    }
+                    p.dedent();
+                } else {
+                    p << "[no methods]"; p.newline();
+                }
+            }
+            p.dedent();
         }
     protected:
         void accept(ASTVisitor * v) override;
@@ -437,6 +681,18 @@ namespace tinycplus {
         ASTIf(Token const & t):
             AST{t} {
         }
+    public:
+        void print(ASTPrettyPrinter & p) const override {
+            p << "if:";
+            p.newline();
+            p.indent();
+            {
+                p << "cond: "; cond->print(p); p.newline();
+                p << "true case: "; trueCase->print(p); p.newline();
+                p << "false case: "; trueCase->print(p); p.newline();
+            }
+            p.dedent();
+        }
     protected:
         void accept(ASTVisitor * v) override;
     };
@@ -453,6 +709,23 @@ namespace tinycplus {
         ASTSwitch(Token const & t):
             AST{t} {
         }
+    public:
+        void print(ASTPrettyPrinter & p) const override {
+            p << "switch:";
+            p.newline();
+            p.indent();
+            {
+                p << "default case:"; defaultCase->print(p); p.newline();
+                p << "cond: "; cond->print(p); p.newline();
+                p.indent();
+                for (auto & it : cases) {
+                    p << "case " << it.first << ": ";
+                    it.second->print(p); p.newline();
+                }
+                p.dedent();
+            }
+            p.dedent();
+        }
     protected:
         void accept(ASTVisitor * v) override;
     };
@@ -468,6 +741,17 @@ namespace tinycplus {
         ASTWhile(Token const & t):
             AST{t} {
         }
+    public:
+        void print(ASTPrettyPrinter & p) const override {
+            p << "while:";
+            p.newline();
+            p.indent();
+            {
+                p << "cond: "; cond->print(p); p.newline();
+                p << "body: "; body->print(p); p.newline();
+            }
+            p.dedent();
+        }
     protected:
         void accept(ASTVisitor * v) override;
     };
@@ -482,6 +766,17 @@ namespace tinycplus {
     public:
         ASTDoWhile(Token const & t):
             AST{t} {
+        }
+    public:
+        void print(ASTPrettyPrinter & p) const override {
+            p << "dowhile:";
+            p.newline();
+            p.indent();
+            {
+                p << "cond: "; cond->print(p); p.newline();
+                p << "body: "; body->print(p); p.newline();
+            }
+            p.dedent();
         }
     protected:
         void accept(ASTVisitor * v) override;
@@ -500,6 +795,18 @@ namespace tinycplus {
         ASTFor(Token const & t):
             AST{t} {
         }
+    public:
+        void print(ASTPrettyPrinter & p) const override {
+            p << "for:";
+            p.newline();
+            p.indent();
+            {
+                p << "init: "; init->print(p); p.newline();
+                p << "cond: "; cond->print(p); p.newline();
+                p << "body: "; body->print(p); p.newline();
+            }
+            p.dedent();
+        }
     protected:
         void accept(ASTVisitor * v) override;
     };
@@ -512,6 +819,10 @@ namespace tinycplus {
         ASTBreak(Token const & t):
             AST{t} {
         }
+    public:
+        void print(ASTPrettyPrinter & p) const override {
+            p << "break";
+        }
     protected:
         void accept(ASTVisitor * v) override;
     };
@@ -523,6 +834,10 @@ namespace tinycplus {
     public:
         ASTContinue(Token const & t):
             AST{t} {
+        }
+    public:
+        void print(ASTPrettyPrinter & p) const override {
+            p << "continue";
         }
     protected:
         void accept(ASTVisitor * v) override;
@@ -537,6 +852,11 @@ namespace tinycplus {
     public:
         ASTReturn(Token const & t):
             AST{t} {
+        }
+    public:
+        void print(ASTPrettyPrinter & p) const override {
+            p << "return ";
+            value->print(p);
         }
     protected:
         void accept(ASTVisitor * v) override;
@@ -561,6 +881,16 @@ namespace tinycplus {
         /** Whether a result of binary operator has an address depends on the operation and operands.
          */
         bool hasAddress() const override;
+        void print(ASTPrettyPrinter & p) const override {
+            p << "binary op (" << op.name() << ")";
+            p.newline();
+            p.indent();
+            {
+                p << "left: "; left->print(p); p.newline();
+                p << "right: "; right->print(p); p.newline();
+            }
+            p.dedent();
+        }
     protected:
         void accept(ASTVisitor * v) override;
     };
@@ -586,6 +916,16 @@ namespace tinycplus {
         bool hasAddress() const override {
             return true;
         }
+        void print(ASTPrettyPrinter & p) const override {
+            p << "assingment (" << op.name() << ")";
+            p.newline();
+            p.indent();
+            {
+                p << "lvalue: "; lvalue->print(p); p.newline();
+                p << "value: "; value->print(p); p.newline();
+            }
+            p.dedent();
+        }
     protected:
         void accept(ASTVisitor * v) override;
     };
@@ -607,6 +947,15 @@ namespace tinycplus {
         /** Whether a result of unary operator has an address depends on the operation and operands.
          */
         bool hasAddress() const override;
+        void print(ASTPrettyPrinter & p) const override {
+            p << "unary op (" << op.name() << ")";
+            p.newline();
+            p.indent();
+            {
+                p << "arg: "; arg->print(p); p.newline();
+            }
+            p.dedent();
+        }
     protected:
         void accept(ASTVisitor * v) override;
     };
@@ -633,6 +982,15 @@ namespace tinycplus {
         bool hasAddress() const override {
             return false;
         }
+        void print(ASTPrettyPrinter & p) const override {
+            p << "unary op post (" << op.name() << ")";
+            p.newline();
+            p.indent();
+            {
+                p << "arg: "; arg->print(p); p.newline();
+            }
+            p.dedent();
+        }
     protected:
         void accept(ASTVisitor * v) override;
     };
@@ -647,6 +1005,16 @@ namespace tinycplus {
         ASTAddress(Token const & t, std::unique_ptr<AST> target):
             AST{t},
             target{std::move(target)} {
+        }
+    public:
+        void print(ASTPrettyPrinter & p) const override {
+            p << "get address";
+            p.newline();
+            p.indent();
+            {
+                p << "target: "; target->print(p); p.newline();
+            }
+            p.dedent();
         }
     protected:
         void accept(ASTVisitor * v) override;
@@ -668,6 +1036,15 @@ namespace tinycplus {
          */
         bool hasAddress() const override {
             return true;
+        }
+        void print(ASTPrettyPrinter & p) const override {
+            p << "get value from addres";
+            p.newline();
+            p.indent();
+            {
+                p << "target: "; target->print(p); p.newline();
+            }
+            p.dedent();
         }
     protected:
         void accept(ASTVisitor * v) override;
@@ -691,6 +1068,16 @@ namespace tinycplus {
          */
         bool hasAddress() const override {
             return base->hasAddress();
+        }
+        void print(ASTPrettyPrinter & p) const override {
+            p << "get at index";
+            p.newline();
+            p.indent();
+            {
+                p << "from: "; base->print(p); p.newline();
+                p << "index: "; index->print(p); p.newline();
+            }
+            p.dedent();
         }
     protected:
         void accept(ASTVisitor * v) override;
@@ -717,6 +1104,16 @@ namespace tinycplus {
         bool hasAddress() const override {
             return base->hasAddress();
         }
+        void print(ASTPrettyPrinter & p) const override {
+            p << "access (" << op.name() << ")";
+            p.newline();
+            p.indent();
+            {
+                p << "from: "; base->print(p); p.newline();
+                p << "member: "; member->print(p); p.newline();
+            }
+            p.dedent();
+        }
     protected:
         void accept(ASTVisitor * v) override;
     };
@@ -732,6 +1129,28 @@ namespace tinycplus {
         ASTCall(Token const & t, std::unique_ptr<AST> function):
             AST{t},
             function{std::move(function)} {
+        }
+    public:
+        void print(ASTPrettyPrinter & p) const override {
+            p << "call";
+            p.newline();
+            p.indent();
+            {
+                p << "function: "; function->print(p); p.newline();
+                if (args.size() > 0) {
+                    p << "args: ";
+                    p.indent();
+                    for (auto & it : args){
+                        p << "1: ";
+                        it->print(p);
+                        p.newline();
+                    }
+                    p.dedent();
+                } else {
+                    p << "[no args]"; p.newline();
+                }
+            }
+            p.dedent();
         }
     protected:
         void accept(ASTVisitor * v) override;
@@ -755,6 +1174,16 @@ namespace tinycplus {
          */
         bool hasAddress() const override {
             return false;
+        }
+        void print(ASTPrettyPrinter & p) const override {
+            p << "cast";
+            p.newline();
+            p.indent();
+            {
+                p << "what: "; value->print(p); p.newline();
+                p << "toType: "; type->print(p); p.newline();
+            }
+            p.dedent();
         }
     protected:
         void accept(ASTVisitor * v) override;

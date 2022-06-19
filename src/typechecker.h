@@ -104,6 +104,7 @@ namespace tinycplus {
             }
         }
         void addVariable(AST * ast, Symbol name, Type * type) {
+            // std::cout << "DEBUG: addding variable (" << name.name() << ") of type (" << type->toString() << ")" << std::endl;
             if (!names_.addVariable(name, type)) {
                 throw ParserError{
                     STR("Name " << name.name() << " already used"),
@@ -255,62 +256,68 @@ namespace tinycplus {
         }
 
         void processMethod(ASTFunDecl * ast) {
-            // creates function type
+            // gets context information
             auto context = pop<Context::Complex>();
             auto methodName = ast->name.value();
-            if (auto * classType = context->complexType->as<Type::Class>()) {
-                std::unique_ptr<Type::Function> ftype{new Type::Function{visitChild(ast->typeDecl)}};
-                checkTypeCompletion(ftype->returnType(), ast->typeDecl);
-                // adds argument types
-                bool isInterfaceMethod = classType->isInterfaceMethod(methodName);
-                auto * targetType = isInterfaceMethod
-                    ? types_.getOrCreatePointerType(types_.getTypeVoid())
-                    : types_.getOrCreatePointerType(classType);
-                ftype->addArgument(targetType);
-                for (auto & i : ast->args) {
-                    auto * argType = visitChild(i->type);
-                    checkTypeCompletion(argType, i->type);
-                    ftype->addArgument(argType);
-                }
-                // registers function type
-                auto * functionType = types_.getOrCreateFunctionType(std::move(ftype));
-                ast->setType(functionType);
-                // registers self as member of the class
-                types_.addMethodToClass(ast, classType, isInterfaceMethod);
-                if (ast->body) {
-                    // enters the context and add all arguments as local variables
-                    names_.enterFunctionScope(functionType->returnType());
-                    {
-                        names_.addVariable(symbols::KwThis, types_.getOrCreatePointerType(classType));
-                        if (auto * base = classType->getBase()) {
-                            names_.addVariable(symbols::KwBase, types_.getOrCreatePointerType(classType->getBase()));
-                        }
-                        for (auto & i : ast->args) {
-                            names_.addVariable(i->name->name, i->type->getType());
-                        }
-                        // typecheck the method body
-                        auto * actualReturn = visitChild(ast->body);
-                        checkReturnType(functionType, actualReturn, ast);
-                    }
-                    // leaves the method context
-                    names_.leaveCurrentScope();
-                }
-            } else if (auto * interfaceType = context->complexType->as<Type::Interface>()) {
-                std::unique_ptr<Type::Function> ftype{new Type::Function{visitChild(ast->typeDecl)}};
-                checkTypeCompletion(ftype->returnType(), ast->typeDecl);
-                // adds argument types
-                ftype->addArgument(types_.getOrCreatePointerType(types_.getTypeVoid()));
-                for (auto & i : ast->args) {
-                    auto * argType = visitChild(i->type);
-                    checkTypeCompletion(argType, i->type);
-                    ftype->addArgument(argType);
-                }
-                // registers function type
-                auto * functionType = types_.getOrCreateFunctionType(std::move(ftype));
-                ast->setType(functionType);
-                // registers self as member of the interface
-                interfaceType->registerField(methodName, types_.getOrCreatePointerType(functionType), ast);
+            auto * classType = context->complexType->as<Type::Class>();
+            assert(classType != nullptr);
+            // creates function type
+            std::unique_ptr<Type::Function> ftype{new Type::Function{visitChild(ast->typeDecl)}};
+            checkTypeCompletion(ftype->returnType(), ast->typeDecl);
+            // adds argument types
+            auto * targetType = types_.getOrCreatePointerType(classType);
+            ftype->addArgument(targetType);
+            for (auto & i : ast->args) {
+                auto * argType = visitChild(i->type);
+                checkTypeCompletion(argType, i->type);
+                ftype->addArgument(argType);
             }
+            // registers function type
+            auto * functionType = types_.getOrCreateFunctionType(std::move(ftype));
+            ast->setType(functionType);
+            // registers self as member of the class
+            types_.addMethodToClass(ast, classType);
+            if (ast->body) {
+                // enters the context and add all arguments as local variables
+                names_.enterFunctionScope(functionType->returnType());
+                {
+                    names_.addVariable(symbols::KwThis, types_.getOrCreatePointerType(classType));
+                    if (auto * base = classType->getBase()) {
+                        names_.addVariable(symbols::KwBase, types_.getOrCreatePointerType(classType->getBase()));
+                    }
+                    for (auto & i : ast->args) {
+                        names_.addVariable(i->name->name, i->type->getType());
+                    }
+                    // typecheck the method body
+                    auto * actualReturn = visitChild(ast->body);
+                    checkReturnType(functionType, actualReturn, ast);
+                }
+                // leaves the method context
+                names_.leaveCurrentScope();
+            }
+        }
+
+        void processInterfaceMethod(ASTFunDecl * ast) {
+            // gets context information
+            auto context = pop<Context::Complex>();
+            auto methodName = ast->name.value();
+            auto * interfaceType = context->complexType->as<Type::Interface>();
+            assert(interfaceType != nullptr);
+            // creates function type
+            std::unique_ptr<Type::Function> ftype{new Type::Function{visitChild(ast->typeDecl)}};
+            checkTypeCompletion(ftype->returnType(), ast->typeDecl);
+            // adds argument types
+            ftype->addArgument(types_.getOrCreatePointerType(types_.getTypeVoid()));
+            for (auto & i : ast->args) {
+                auto * argType = visitChild(i->type);
+                checkTypeCompletion(argType, i->type);
+                ftype->addArgument(argType);
+            }
+            // registers function type
+            auto * functionType = types_.getOrCreateFunctionType(std::move(ftype));
+            ast->setType(functionType);
+            // registers self as member of the interface
+            interfaceType->registerField(methodName, types_.getOrCreatePointerType(functionType), ast);
         }
     }; // tinyc::TypeChecker
 

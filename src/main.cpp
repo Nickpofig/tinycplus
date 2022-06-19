@@ -23,6 +23,7 @@ tiny::Symbol tinycplus::symbols::Entry = tinycplus::symbols::NoEntry;
 const std::string keyColorful = "--colorful";
 const std::string keyEntry = "--entry";
 const std::string keyTinyCtoCpp = "--tinyc-to-cpp"; 
+const std::string keyParseOnly = "--parse-only";
 
 void checkForHelpRequest(int argc, char** argv) {
     const std::string tab {"    "};
@@ -48,21 +49,29 @@ void checkForHelpRequest(int argc, char** argv) {
     }
 }
 
-int main(int argc, char ** argv) {
+// #include <signal.h>
+// void handle_os_signal(int code) {
+//     std::cerr << "[OS] interrupt code: " << code << std::endl;
+// }
+
+void main(int argc, char ** argv) {
     checkForHelpRequest(argc, argv);
     tiny::config.parse(argc, argv);
-    tiny::config.setDefaultIfMissing(keyColorful, "F");
-    tiny::config.setDefaultIfMissing(keyTinyCtoCpp, "F");
-    tiny::config.setDefaultIfMissing(keyEntry, tinycplus::symbols::NoEntry.name());
+    // flags check
     auto inputFilepath = tiny::config.input();
-    bool isPrintColorful = tiny::config.get(keyColorful).compare("T") == 0;
-    bool isConvertingTinycToCPP = tiny::config.get(keyTinyCtoCpp).compare("T") == 0;
+    bool isParseOnly = !tiny::config.setDefaultIfMissing(keyParseOnly, "");;
+    bool isPrintColorful = !tiny::config.setDefaultIfMissing(keyColorful, "");
+    bool isConvertingTinycToCPP = !tiny::config.setDefaultIfMissing(keyTinyCtoCpp, "");;
+    // entry check
+    tiny::config.setDefaultIfMissing(keyEntry, tinycplus::symbols::NoEntry.name());
     tinycplus::symbols::Entry = tiny::Symbol{tiny::config.get(keyEntry)};
+    // file check
     if (!std::filesystem::exists(inputFilepath)) {
         throw std::runtime_error(program_errors::no_input);
     }
     if (isConvertingTinycToCPP) {
         tinycToCpp::execute(inputFilepath);
+        return;
     }
     try {
         tinycplus::TypesContext typesContext{};
@@ -70,6 +79,11 @@ int main(int argc, char ** argv) {
         tinycplus::TypeChecker typechecker{typesContext, namesContext};
         tinycplus::Transpiler transpiler{namesContext, typesContext, std::cout, isPrintColorful};
         auto program = tinycplus::Parser::ParseFile(inputFilepath);
+        if (isParseOnly) {
+            tiny::ASTPrettyPrinter printer {std::cout};
+            program->print(printer);
+            return;
+        }
         typechecker.visit(program.get());
         transpiler.visit(program.get());
         transpiler.validateSelf();

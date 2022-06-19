@@ -92,7 +92,7 @@ namespace tinycplus {
             } else {
                 T * result = dynamic_cast<T*>(i->second.get());
                 if (result == nullptr) throw std::runtime_error {
-                    STR("Name: " << name.name() << " already reserved for another type.")
+                    STR("TYPECHECK: name (" << name.name() << ") was already reserved for another type.")
                 };
                 return result;
             }
@@ -105,7 +105,8 @@ namespace tinycplus {
 
         Type::Interface * getOrCreateInterfaceType(Symbol name) {
             auto maker = [name] () {
-                return new Type::Interface{name};
+                auto * vtable = new Type::VTable{name};
+                return new Type::Interface{name, vtable};
             };
             return getOrCreateNonAliasType<Type::Interface>(name, maker);
         }
@@ -153,19 +154,31 @@ namespace tinycplus {
             }
         }
 
-        void addMethodToClass(ASTFunDecl * methodAst, Type::Class * classType, bool isInterfaceMethod) {
+        void addMethodToClass(ASTFunDecl * methodAst, Type::Class * classType) {
             auto methodName = methodAst->name.value();
             auto * functionType = methodAst->getType()->as<Type::Function>();
-            classType->registerMethod(methodName, functionType, methodAst, isInterfaceMethod);
+            classType->registerMethod(methodName, functionType, methodAst);
             if (methodAst->isVirtualized()) {
                 auto * vtable = classType->getVirtualTable();
-                auto functionPointerName = symbols::system()
-                    .add(classType->toString())
-                    .add("__vtable__")
-                    .add(methodName)
-                    .end();
-                auto * vtableMemberType = createTypeAlias(functionPointerName, getOrCreatePointerType(functionType));
+                auto functionPtrTypeName = symbols::makeClassMethodFuncType(classType->name, methodName);
+                auto * vtableMemberType = createTypeAlias(functionPtrTypeName, getOrCreatePointerType(functionType));
                 vtable->registerField(methodName, vtableMemberType, methodAst);
+            }
+        }
+
+        void addMethodToInterface(ASTFunDecl * methodAst, Type::Interface * interfaceType) {
+            auto methodName = methodAst->name.value();
+            auto * functionType = methodAst->getType()->as<Type::Function>();
+            auto functionPtrTypeName = symbols::makeInterfaceMethodFuncType(methodName);
+            auto * functionPtrType = createTypeAlias(functionPtrTypeName, getOrCreatePointerType(functionType));
+            interfaceType->addMethod(methodName, functionType, functionPtrType);
+            interfaceType->vtable->registerField(methodName, functionPtrType, methodAst);
+        }
+
+        void printAllTypes() {
+            std::cout << "DEBUG: Parsed types:" << std::endl;
+            for (auto & it : types_) {
+                std::cout << it.first << " | " << it.second->toString() << std::endl;
             }
         }
     }; // tinycplus::TypesContext

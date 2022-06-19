@@ -17,7 +17,7 @@ namespace tinycplus {
         } else if (condPop(symbols::KwAccessProtected)) {
             return AccessMod::Protected;
         }
-        throw ParserError(STR("Expected access modifier, but " << whatFirst << " found"), whatFirst.location(), eof());
+        throw ParserError(STR("PARSER: expected access modifier, but " << whatFirst << " found"), whatFirst.location(), eof());
     }
 
     std::unique_ptr<AST> Parser::FUN_OR_VAR_DECL(std::optional<Symbol> className) {
@@ -34,12 +34,12 @@ namespace tinycplus {
         TYPE(true);
         if (isForClass && top() == Symbol::ParOpen) { // check for class constructor
             revertTo(x);
-            return FUN_DECL(FunctionKind::Constructor);
+            return FUN_DECL(FunctionKind::ClassConstructor);
         } else {
             IDENT();
             if (top() == Symbol::ParOpen) { // check for function
                 revertTo(x);
-                return FUN_DECL(isForClass ? FunctionKind::Method : FunctionKind::None);
+                return FUN_DECL(isForClass ? FunctionKind::ClassMethod : FunctionKind::None);
             } else {
                 revertTo(x);
                 auto varDecl = isForClass ? VAR_DECL(isForClass) : VAR_DECLS();
@@ -78,16 +78,16 @@ namespace tinycplus {
     */
     std::unique_ptr<AST> Parser::FUN_DECL(FunctionKind kind) {
         auto accessMod = AccessMod::Public;
-        bool isForClass = kind != FunctionKind::None;
+        bool isForClass = kind == FunctionKind::ClassMethod || kind == FunctionKind::ClassConstructor;
         if (isForClass) {
             accessMod = ACCESS_MOD();
         }
         auto token = top();
         std::unique_ptr<ASTType> type{TYPE_FUN_RET()};
         if (!isIdentifier(top())) {
-            throw ParserError(STR("Expected identifier, but " << top() << " found"), top().location(), eof());
+            throw ParserError(STR("PARSER: expected class type as constructor name, but " << top() << " found"), top().location(), eof());
         }
-        bool isConstructor = kind == FunctionKind::Constructor;
+        bool isConstructor = kind == FunctionKind::ClassConstructor;
         if (isConstructor) {
         } else {
             token = pop();
@@ -95,8 +95,6 @@ namespace tinycplus {
         std::unique_ptr<ASTFunDecl> result{new ASTFunDecl{token, std::move(type)}};
         result->kind = kind;
         result->name = token.valueSymbol();
-        // if (!isConstructor) {
-        // }
         pop(Symbol::ParOpen);
         if (top() != Symbol::ParClose) {
             do {
@@ -112,7 +110,7 @@ namespace tinycplus {
             } while (condPop(Symbol::Comma));
         }
         pop(Symbol::ParClose);
-        if (kind == FunctionKind::Method) {
+        if (kind == FunctionKind::ClassMethod) {
             bool isAbstract_ = false;
             // defines method virtuality
             if (condPop(symbols::KwVirtual)) {
@@ -128,7 +126,7 @@ namespace tinycplus {
                 result->body = BLOCK_STMT();
             } else if (!condPop(Symbol::Semicolon)) {
                 throw ParserError {
-                    STR("Expected ';' but " << top() << " found. Remember that an abstract method cannot have a body."),
+                    STR("PARSER: expected semincolon but " << top() << " found. Remember that an abstract method cannot have a body."),
                     top().location(), false
                 };
             }
@@ -151,7 +149,7 @@ namespace tinycplus {
             if (top() == Symbol::CurlyOpen) {
                 result->body = BLOCK_STMT();
             } else if (!condPop(Symbol::Semicolon)) {
-                throw ParserError(STR("Expected semicolon after method forward declartion"), top().location(), false);
+                throw ParserError(STR("PARSER: expected semicolon after method forward declartion"), top().location(), false);
             }
         }
         return result;
@@ -409,7 +407,7 @@ namespace tinycplus {
         if (condPop(Symbol::CurlyOpen)) {
             while (! condPop(Symbol::CurlyClose)) {
                 // parsing field and method
-                auto member = FUN_DECL(FunctionKind::Method);
+                auto member = FUN_DECL(FunctionKind::InterfaceMethod);
                 if (auto * method = member->as<ASTFunDecl>()) {
                     auto methodName = method->name.value().name();
                     if (method->body) throw ParserError {
@@ -425,7 +423,7 @@ namespace tinycplus {
         return interfaceDecl;
     }
 
-    /* CLASS_DECL := 'class' identifier [ : identifier ] [ '{' { TYPE identifier ';' | FUN_DECL } '}' ] ';'
+    /* CLASS_DECL := 'class' identifier [ ':' identifier { ',' identifier } ] [ '{' { TYPE identifier ';' | FUN_DECL } '}' ] ';'
         */
     std::unique_ptr<ASTClassDecl> Parser::CLASS_DECL() {
         auto const & start = pop(symbols::KwClass);
@@ -436,6 +434,9 @@ namespace tinycplus {
         // Parses base class
         if (condPop(Symbol::Colon)) {
             classDecl->baseClass = TYPE();
+            while(condPop(Symbol::Comma)) {
+                classDecl->interfaces.push_back(TYPE());
+            }
         }
         // Parses body
         if (condPop(Symbol::CurlyOpen)) {
@@ -447,7 +448,7 @@ namespace tinycplus {
                 if (auto * field = member->as<ASTVarDecl>()) {
                     classDecl->fields.push_back(std::unique_ptr<ASTVarDecl>(field));
                 } else if (auto * func = member->as<ASTFunDecl>()) {
-                    if (func->isConstructor()) { // saving as constructor
+                    if (func->isClassConstructor()) { // saving as constructor
                         classDecl->constructors.push_back(std::unique_ptr<ASTFunDecl>(func));
                     } else {  // saving as method
                         classDecl->methods.push_back(std::unique_ptr<ASTFunDecl>(func));
@@ -497,7 +498,7 @@ namespace tinycplus {
         auto accessMod = isField ? ACCESS_MOD() : AccessMod::Public;
         std::unique_ptr<ASTVarDecl> decl{new ASTVarDecl{start, TYPE()}};
         decl->name = IDENT();
-        decl->accessMod = accessMod;
+        decl->access = accessMod;
         if (condPop(Symbol::SquareOpen)) {
             std::unique_ptr<AST> index{E9()};
             pop(Symbol::SquareClose);
@@ -664,6 +665,7 @@ namespace tinycplus {
     }
 
     std::unique_ptr<AST> Parser::E_CALL(std::unique_ptr<AST> & functionName) {
+        // std::cout << "DEBUG: member call." << std::endl;
         std::unique_ptr<ASTCall> call{new ASTCall{pop(), std::move(functionName)}};
         if (top() != Symbol::ParClose) {
             call->args.push_back(EXPR());
