@@ -191,6 +191,13 @@ namespace tinycplus {
             printNewline();
         }
 
+        void printVTableDefaultFields() {
+            // ** this fields
+            printField(types_.castToClassFuncPtrType, symbols::VirtualTableCastToClassField);
+            // ** impl field
+            printField(types_.getImplFuncPtrType, symbols::VirtualTableGetImplField);
+        }
+
         void printVTableStruct(Type::Class * classType) {
             if (classType->isAbstract()) {
                 return;
@@ -204,6 +211,7 @@ namespace tinycplus {
             printIdentifier(vtableType->typeName);
             printSpace();
             printScopeOpen();
+            printVTableDefaultFields();
             // ** prints function pointers for each virtual method with respect to class precedence order
             printFields(vtableFields);
             printScopeClose(true);
@@ -214,6 +222,34 @@ namespace tinycplus {
             printIdentifier(vtableType->instanceName);
             printSymbol(Symbol::Semicolon);
             printNewline();
+            printNewline();
+        }
+
+        void printFuncPtrAssignment(
+            Symbol base,
+            Symbol fptr,
+            Symbol function,
+            std::optional<Symbol> typeToCast = std::nullopt
+        ) {
+            printIdentifier(base);
+            printSymbol(Symbol::Dot);
+            printIdentifier(fptr);
+            printSpace();
+            printSymbol(Symbol::Assign);
+            printSpace();
+            if (typeToCast.has_value()) {
+                printSymbol(Symbol::KwCast);
+                printSymbol(Symbol::Lt);
+                printType(typeToCast.value());
+                printSymbol(Symbol::Gt);
+                printSymbol(Symbol::ParOpen);
+            }
+            printSymbol(Symbol::BitAnd);
+            printIdentifier(function);
+            if (typeToCast.has_value()) {
+                printSymbol(Symbol::ParClose);
+            }
+            printSymbol(Symbol::Semicolon);
             printNewline();
         }
 
@@ -235,19 +271,12 @@ namespace tinycplus {
                 std::vector<FieldInfo> vtableFields;
                 vtableType->collectFieldsOrdered(vtableFields);
                 printComment(STR("setup of vtable instance"));
+                printFuncPtrAssignment(vtableType->instanceName, symbols::VirtualTableCastToClassField, classType->classCastName);
+                printFuncPtrAssignment(vtableType->instanceName, symbols::VirtualTableGetImplField, classType->getImplName);
                 for (auto & field : vtableFields) {
                     // e.g ~~> this.vtable->functionPtr = function;
-                    printIdentifier(vtableType->instanceName);
-                    printSymbol(Symbol::Dot);
-                    printIdentifier(field.name);
-                    printSpace();
-                    printSymbol(Symbol::Assign);
-                    printSpace();
                     auto methodInfo = classType->getMethodInfo(field.name).value();
-                    printSymbol(Symbol::BitAnd);
-                    printIdentifier(methodInfo.fullName);
-                    printSymbol(Symbol::Semicolon);
-                    printNewline();
+                    printFuncPtrAssignment(vtableType->instanceName, field.name, methodInfo.fullName);
                 }
                 printNewline();
                 // ** set fields of each interfae implementation
@@ -258,30 +287,27 @@ namespace tinycplus {
                     auto * interfaceType = face.second;
                     auto implInstance = getClassImplInstanceName(interfaceType, classType);
                     for (auto & method : interfaceType->methods_) {
-                        
                         auto classMethod = classType->getMethodInfo(method.first).value();
-                        printNewline();
-                        printIdentifier(implInstance);
-                        printSymbol(Symbol::Dot);
-                        printIdentifier(method.first);
-                        printSpace();
-                        printSymbol(Symbol::Assign);
-                        printSpace();
-                        printSymbol(Symbol::KwCast);
-                        printSymbol(Symbol::Lt);
-                        printType(method.second.ptrType);
-                        printSymbol(Symbol::Gt);
-                        printSymbol(Symbol::ParOpen);
-                        printSymbol(Symbol::BitAnd);
-                        printIdentifier(classMethod.fullName);
-                        printSymbol(Symbol::ParClose);
-                        printSymbol(Symbol::Semicolon);
+                        printFuncPtrAssignment(
+                            implInstance,
+                            method.first,
+                            classMethod.fullName,
+                            method.second.ptrType->toString()
+                        );
                     }
                 }
             }
             // * body end
             printScopeClose(false);
             printNewline();
+        }
+
+        void printCastToInterfaceFunction(Type::Interface * type) {
+            // args: (class instance)
+            // * gets class vtable
+            // * casts to general vtable
+            // * gets and calls "check impl" function
+            // * "check impl" result is used in
         }
 
         void printCastToClassFunction(Type::Class * classType) {

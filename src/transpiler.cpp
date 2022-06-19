@@ -198,6 +198,41 @@ namespace tinycplus {
     void Transpiler::visit(ASTProgram * ast) {
         printer_.newline();
         pushAst(ast);
+
+        // * default interface view struct
+        {
+            printKeyword(Symbol::KwStruct);
+            printSpace();
+            printIdentifier(symbols::InterfaceViewStruct);
+            printSpace();
+            printScopeOpen();
+            {
+                // ** this fields
+                printField(types_.getTypeVoidPtr(), symbols::InterfaceTargetAsField);
+                // ** impl field
+                printField(types_.getTypeVoidPtr(), symbols::InterfaceImplAsField);
+            }
+            printScopeClose(true);
+            printNewline();
+        }
+
+        // * default vtable struct
+        {
+            printFunctionPointerType(types_.castToClassFuncPtrType);
+            printFunctionPointerType(types_.getImplFuncPtrType);
+
+            printKeyword(Symbol::KwStruct);
+            printSpace();
+            printIdentifier(symbols::VirtualTableGeneralStruct);
+            printSpace();
+            printScopeOpen();
+            {
+                printVTableDefaultFields();
+            }
+            printScopeClose(true);
+            printNewline();
+        }
+
         for (auto & i : ast->body) {
             visitChild(i.get());
             printer_.newline();
@@ -220,6 +255,12 @@ namespace tinycplus {
             printSymbol(Symbol::SquareOpen);
             visitChild(arrayType->size.get());
             printSymbol(Symbol::SquareClose);
+        } else if (auto interfaceType = ast->getType()->getCore<Type::Interface>()) {
+            // variable type
+            printType(symbols::InterfaceViewStruct);
+            printSpace();
+            // variable name
+            visitChild(ast->name.get());
         } else {
             // base type part
             visitChild(ast->type.get());
@@ -304,21 +345,9 @@ namespace tinycplus {
         printScopeOpen();
         printFields(implFields);
         printScopeClose(true);
-        // * interface
-        printKeyword(Symbol::KwStruct);
-        printSpace();
-        printIdentifier(type->name);
-        printSpace();
-        printScopeOpen();
-        {
-            // ** this fields
-            printField(types_.getOrCreatePointerType(types_.getTypeVoid()), symbols::InterfaceTargetAsField);
-            // ** impl field
-            printField(type->implStructName, symbols::InterfaceImplAsField);
-        }
-        printScopeClose(true);
         /// TODO:
-        // * interface function
+        // * cast to interface function
+        printCastToInterfaceFunction(type);
         popAst();
     }
 

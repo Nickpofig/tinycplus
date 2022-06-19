@@ -389,7 +389,7 @@ namespace tinycplus {
         const Symbol initName;
         const Symbol setupName;
         const Symbol classCastName;
-        const Symbol interfaceCastName;
+        const Symbol getImplName;
         std::vector<Type::Function*> constructors;
         std::unordered_map<Symbol, Type::Interface * > interfaces;
     private:
@@ -406,7 +406,7 @@ namespace tinycplus {
             ,initName{symbols::start().add(symbols::ClassInitConstructorPrefix).add(name).end()}
             ,setupName{symbols::start().add(symbols::ClassSetupFunctionPrefix).add(name).end()}
             ,classCastName{symbols::start().add(symbols::ClassCastToClassPrefix).add(name).end()}
-            ,interfaceCastName{symbols::start().add(symbols::ClassCastToInterfacePrefix).add(name).end()}
+            ,getImplName{symbols::start().add(symbols::ClassGetImplPrefix).add(name).end()}
         {
             static int id = 0;
             id_ = id;

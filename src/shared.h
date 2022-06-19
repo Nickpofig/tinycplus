@@ -85,8 +85,10 @@ namespace tinycplus {
 
         static Symbol ClassMakeConstructorPrefix {"_Cmake_"};
         static Symbol ClassInitConstructorPrefix {"_Cinit_"};
-        static Symbol ClassCastToClassPrefix {"_CcastC_"};
-        static Symbol ClassCastToInterfacePrefix {"_CcastI_"};
+        static Symbol ClassCastToClassPrefix {"_Ccastc_"};
+        static Symbol ClassCastToClassFuncType {"_Ccastcfunc_"};
+        static Symbol ClassGetImplPrefix {"_Cgeti_"};
+        static Symbol ClassGetImplFuncType {"_Cgetifunc_"};
         static Symbol ClassMethodPrefix {"_Cfunc_"};
         static Symbol ClassMethodFuncTypePrefix {"_Cfuncptr_"}; // prefix for function pointer type of virtual table member.
         static Symbol ClassInterfaceImplInstPrefix {"_Cimpl_"};
@@ -94,7 +96,11 @@ namespace tinycplus {
 
         static Symbol VirtualTableTypePrefix {"_VTtype_"};     // prefix of the virtual table struct
         static Symbol VirtualTableInstancePrefix {"_VTinst_"}; // prefix for global virtual table instance
+        static Symbol VirtualTableGeneralStruct {"_VTany_"}; // prefix for global virtual table instance
+        static Symbol VirtualTableCastToClassField {"_castc"}; // local to all vtable structs
+        static Symbol VirtualTableGetImplField {"_geti"};      // local to all vtable structs
 
+        static Symbol InterfaceViewStruct {"_Iview_"};
         static Symbol InterfaceImplTypePrefix {"_Iimpl_"};
         static Symbol InterfaceMethodFuncTypePrefix {"_Ifunc_"};
 

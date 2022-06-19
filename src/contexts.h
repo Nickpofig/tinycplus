@@ -19,13 +19,28 @@ namespace tinycplus {
         Type * double_;
         Type * char_;
         Type * void_;
-
+    public: // function pointer aliases
+        Type::Alias * castToClassFuncPtrType;
+        Type::Alias * getImplFuncPtrType;
     public: // constructors
         TypesContext() {
             int_ = types_.insert(std::make_pair(Symbol::KwInt.name(), std::unique_ptr<Type>{new Type::POD{Symbol::KwInt}})).first->second.get();
             double_ = types_.insert(std::make_pair(Symbol::KwDouble.name(), std::unique_ptr<Type>{new Type::POD{Symbol::KwDouble}})).first->second.get();
             char_ = types_.insert(std::make_pair(Symbol::KwChar.name(), std::unique_ptr<Type>{new Type::POD{Symbol::KwChar}})).first->second.get();
             void_ = types_.insert(std::make_pair(Symbol::KwVoid.name(), std::unique_ptr<Type>{new Type::POD{Symbol::KwVoid}})).first->second.get();
+
+            // * "cast to class" function pointer type (void* classInst, int classId)->void*
+            auto castToClassFunc = std::unique_ptr<Type::Function> { new Type::Function(getTypeVoidPtr()) };
+            castToClassFunc->addArgument(getTypeVoidPtr());
+            castToClassFunc->addArgument(getTypeInt());
+            auto castToClassFuncPtr = getOrCreateFunctionType(std::move(castToClassFunc));
+            castToClassFuncPtrType = createTypeAlias(symbols::ClassCastToClassFuncType, castToClassFuncPtr);
+
+            // * "get interface impl" function pointer type (int interfaceId)->void*
+            auto getImplFunc = std::unique_ptr<Type::Function> { new Type::Function(getTypeVoidPtr()) };
+            getImplFunc->addArgument(getTypeInt());
+            auto getImplFuncPtr = getOrCreateFunctionType(std::move(getImplFunc));
+            getImplFuncPtrType = createTypeAlias(symbols::ClassGetImplFuncType, getImplFuncPtr);
         }
 
     public: // getters
@@ -43,6 +58,10 @@ namespace tinycplus {
 
         Type * getTypeVoid() const {
             return void_;
+        }
+
+        Type * getTypeVoidPtr() {
+            return getOrCreatePointerType(void_);
         }
 
         Type * getType(Symbol symbol) const {
