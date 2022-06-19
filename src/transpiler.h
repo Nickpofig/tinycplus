@@ -140,11 +140,11 @@ namespace tinycplus {
         }
 
         inline void printField(Symbol type, Symbol name) {
-            printNewline();
             printType(type);
             printSpace();
             printIdentifier(name);
             printSymbol(Symbol::Semicolon);
+            printNewline();
         }
 
         inline void printField(Type * type, Symbol name) {
@@ -302,17 +302,208 @@ namespace tinycplus {
             printNewline();
         }
 
+        /* type: (void* class instance) -> interface view
+        */
         void printCastToInterfaceFunction(Type::Interface * type) {
-            // args: (class instance)
-            // * gets class vtable
-            // * casts to general vtable
-            // * gets and calls "check impl" function
-            // * "check impl" result is used in
+            auto argInstName = Symbol{"inst"};
+            auto localVtableName = Symbol{"vtable"};
+            auto localImplName = Symbol{"impl"};
+            auto localViewName = Symbol{"view"};
+            // * return type
+            printType(symbols::InterfaceViewStruct);
+            printSpace();
+            // * name
+            printIdentifier(type->castName);
+            // * arguments
+            printSymbol(Symbol::ParOpen);
+            printType(types_.getTypeVoid());
+            printSymbol(Symbol::Mul);
+            printSpace();
+            printIdentifier(argInstName);
+            printSymbol(Symbol::ParClose);
+            printSpace();
+            // * body start
+            printScopeOpen();
+            {
+                // * interface view instance
+                printType(symbols::InterfaceViewStruct);
+                printSpace();
+                printIdentifier(localViewName);
+                printSymbol(Symbol::Semicolon);
+                printNewline();
+                // * casts class instance to general vtable ptr (as they share the same memory position)
+                printType(symbols::VirtualTableGeneralStruct);
+                printType(Symbol::Mul);
+                printSpace();
+                printIdentifier(localVtableName);
+                printSpace();
+                printSymbol(Symbol::Assign);
+                printSpace();
+                printSymbol(Symbol::KwCast);
+                printSymbol(Symbol::Lt);
+                printType(symbols::VirtualTableGeneralStruct);
+                printType(Symbol::Mul);
+                printSymbol(Symbol::Gt);
+                printSymbol(Symbol::ParOpen);
+                printIdentifier(argInstName);
+                printSymbol(Symbol::ParClose);
+                printSymbol(Symbol::Semicolon);
+                printNewline();
+                // * stores result of "check impl" function call
+                printType(type->implStructName);
+                printType(Symbol::Mul);
+                printSpace();
+                printIdentifier(localImplName);
+                printSpace();
+                printSymbol(Symbol::Assign);
+                printSpace();
+                { // cast from (void*) to (impl struct*)
+                    printSymbol(Symbol::KwCast);
+                    printSymbol(Symbol::Lt);
+                    printType(type->implStructName);
+                    printType(Symbol::Mul);
+                    printSymbol(Symbol::Gt);
+                    printSymbol(Symbol::ParOpen);
+                    { // vtable get implementation call
+                        printIdentifier(localVtableName);
+                        printSymbol(Symbol::Dot);
+                        printIdentifier(symbols::VirtualTableGetImplField);
+                        printSymbol(Symbol::ParOpen);
+                        printNumber(type->getId());
+                        printSymbol(Symbol::ParClose);
+                    }
+                    printSymbol(Symbol::ParClose);
+                    printSymbol(Symbol::Semicolon);
+                }
+                printNewline();
+                // * "check impl" result in if statement
+                printKeyword(Symbol::KwIf);
+                printSymbol(Symbol::ParOpen);
+                printIdentifier(localImplName);
+                printSpace();
+                printSymbol(Symbol::Eq);
+                printSpace();
+                printIdentifier(symbols::KwNull);
+                printSymbol(Symbol::ParClose);
+                printScopeOpen(); // is null case
+                {
+                    // * assigns (null) impl ptr to view
+                    printIdentifier(localViewName);
+                    printSymbol(Symbol::Dot);
+                    printIdentifier(symbols::InterfaceImplAsField);
+                    printSpace();
+                    printSymbol(Symbol::Assign);
+                    printSpace();
+                    printIdentifier(symbols::KwNull);
+                    printSymbol(Symbol::Semicolon);
+                    printNewline();
+                    // * assigns (null) target ptr to view
+                    printIdentifier(localViewName);
+                    printSymbol(Symbol::Dot);
+                    printIdentifier(symbols::InterfaceTargetAsField);
+                    printSpace();
+                    printSymbol(Symbol::Assign);
+                    printSpace();
+                    printIdentifier(symbols::KwNull);
+                    printSymbol(Symbol::Semicolon);
+                }
+                printScopeClose(false);
+                printKeyword(Symbol::KwElse);
+                printScopeOpen(); // is not null case
+                {
+                    // * assigns impl ptr to view
+                    printIdentifier(localViewName);
+                    printSymbol(Symbol::Dot);
+                    printIdentifier(symbols::InterfaceImplAsField);
+                    printSpace();
+                    printSymbol(Symbol::Assign);
+                    printSpace();
+                    printIdentifier(localImplName);
+                    printSymbol(Symbol::Semicolon);
+                    printNewline();
+                    // * assigns target ptr to view
+                    printIdentifier(localViewName);
+                    printSymbol(Symbol::Dot);
+                    printIdentifier(symbols::InterfaceTargetAsField);
+                    printSpace();
+                    printSymbol(Symbol::Assign);
+                    printSpace();
+                    printIdentifier(argInstName);
+                    printSymbol(Symbol::Semicolon);
+                }
+                printScopeClose(false);
+            }
+            // * body end
+            printKeyword(Symbol::KwReturn);
+            printSpace();
+            printIdentifier(localViewName);
+            printSymbol(Symbol::Semicolon);
+            printScopeClose(false);
+            printNewline();
+        }
+
+        void printGetImplFunction(Type::Class * classType) {
+            auto argIdName = Symbol{"id"};
+            // * return type
+            printType(types_.getTypeVoid());
+            printSymbol(Symbol::Mul);
+            printSpace();
+            // * name
+            printIdentifier(classType->getImplName);
+            // * arguments
+            printSymbol(Symbol::ParOpen);
+            printType(types_.getTypeInt());
+            printSpace();
+            printIdentifier(argIdName);
+            printSymbol(Symbol::ParClose);
+            printSpace();
+            // * body start
+            printScopeOpen();
+            {
+                // ** switches between base class ids
+                printKeyword(Symbol::KwSwitch);
+                printSymbol(Symbol::ParOpen);
+                printIdentifier(argIdName);
+                printSymbol(Symbol::ParClose);
+                printScopeOpen();
+                for (auto & it : classType->interfaces) {
+                    // ** class index case
+                    printKeyword(Symbol::KwCase);
+                    printSpace();
+                    printNumber(it.second->getId());
+                    printSymbol(Symbol::Colon);
+                    printSpace();
+                    printKeyword(Symbol::KwReturn);
+                    printSpace();
+                    printSymbol(Symbol::KwCast);
+                    printSymbol(Symbol::Lt);
+                    printType(types_.getTypeVoidPtr());
+                    printSymbol(Symbol::Gt);
+                    printSymbol(Symbol::ParOpen);
+                    printSymbol(Symbol::BitAnd);
+                    printIdentifier(getClassImplInstanceName(it.second, classType));
+                    printSymbol(Symbol::ParClose);
+                    printSymbol(Symbol::Semicolon);
+                    printNewline();
+                }
+                // ** default case
+                printKeyword(Symbol::KwDefault);
+                printSymbol(Symbol::Colon);
+                printSpace();
+                printKeyword(Symbol::KwReturn);
+                printSpace();
+                printSymbol(symbols::KwNull);
+                printSymbol(Symbol::Semicolon);
+                printScopeClose(false);
+            }
+            // * body end
+            printScopeClose(false);
+            printNewline();
         }
 
         void printCastToClassFunction(Type::Class * classType) {
-            auto localInstName = Symbol{"inst"};
-            auto localIdName = Symbol{"id"};
+            auto argInstName = Symbol{"inst"};
+            auto argIdName = Symbol{"id"};
             // * return type
             printType(types_.getTypeVoid());
             printSymbol(Symbol::Mul);
@@ -324,11 +515,11 @@ namespace tinycplus {
             printType(types_.getTypeVoid());
             printSymbol(Symbol::Mul);
             printSpace();
-            printIdentifier(localInstName);
+            printIdentifier(argInstName);
             printSymbol(Symbol::Comma);
             printType(types_.getTypeInt());
             printSpace();
-            printIdentifier(localIdName);
+            printIdentifier(argIdName);
             printSymbol(Symbol::ParClose);
             printSpace();
             // * body start
@@ -337,10 +528,10 @@ namespace tinycplus {
                 // ** switches between base class ids
                 printKeyword(Symbol::KwSwitch);
                 printSymbol(Symbol::ParOpen);
-                printIdentifier(localIdName);
+                printIdentifier(argIdName);
                 printSymbol(Symbol::ParClose);
                 printScopeOpen();
-                for (auto * base = classType->getBase(); base != nullptr; base = base->getBase()) {
+                for (auto * base = classType; base != nullptr; base = base->getBase()) {
                     // ** class index case
                     printKeyword(Symbol::KwCase);
                     printSpace();
@@ -349,7 +540,7 @@ namespace tinycplus {
                     printSpace();
                     printKeyword(Symbol::KwReturn);
                     printSpace();
-                    printSymbol(localInstName);
+                    printSymbol(argInstName);
                     printSymbol(Symbol::Semicolon);
                     printNewline();
                 }

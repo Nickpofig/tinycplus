@@ -344,6 +344,7 @@ namespace tinycplus {
     public:
         const Symbol name;
         const Symbol implStructName;
+        const Symbol castName;
         std::unordered_map<Symbol, MethodInfo> methods_;
         Type::VTable * vtable;
     private:
@@ -353,6 +354,7 @@ namespace tinycplus {
             :name{name}
             ,vtable{vtable}
             ,implStructName{symbols::makeImplStructName(name)}
+            ,castName{symbols::start().add(symbols::InterfaceCastFuncPerfix).add(name).end()}
         {
             static int id = 0;
             id_ = id;

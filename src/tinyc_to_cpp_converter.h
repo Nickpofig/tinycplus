@@ -28,6 +28,7 @@ namespace tinycToCpp {
         // 1. tinyC+ extensively uses "this" keyword which means nothing in tinyC, but is a keword in C++.
         //    Therefore, to resolve compile errors on using "this" keyword, we can prefix underscore to it turning it into a valid identifier 
         find_and_replace(content, "this", "_this");
+        find_and_replace(content, "null", "_null");
         // 2. C++ does not have "cast" operator, but "reinterpret_cast" matches expectations of what "cast" does,
         find_and_replace(content, "cast<", "reinterpret_cast<");
         // Now, out tinyC code is actually a very modest version of C++ program, which can be runned just fine.

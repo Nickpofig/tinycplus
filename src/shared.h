@@ -76,12 +76,14 @@ namespace tinycplus {
         static Symbol KwVirtual {"virtual"}; // marks the method as virtual.
         static Symbol KwOverride {"override"}; // marks the method as override of base class virtual method.
         static Symbol KwAbstract {"abstract"}; // marks the method as abstract.
-        static Symbol KwThis {"this"}; // compulsory first argument of any method, representing reference to the target.
-        static Symbol KwBase {"base"}; // cast of "this" to the base type of the current class.
         static Symbol KwAccessPublic {"public"};
         static Symbol KwAccessPrivate {"private"};
         static Symbol KwAccessProtected {"protected"};
-        static Symbol KwNull {"null"};
+
+        // RESERVED IDENTIFIERS
+        static Symbol KwThis {"this"}; // compulsory first argument of any method, representing reference to the target.
+        static Symbol KwBase {"base"}; // cast of "this" to the base type of the current class.
+        static Symbol KwNull {"null"}; // null void pointer
 
         static Symbol ClassMakeConstructorPrefix {"_Cmake_"};
         static Symbol ClassInitConstructorPrefix {"_Cinit_"};
@@ -103,6 +105,7 @@ namespace tinycplus {
         static Symbol InterfaceViewStruct {"_Iview_"};
         static Symbol InterfaceImplTypePrefix {"_Iimpl_"};
         static Symbol InterfaceMethodFuncTypePrefix {"_Ifunc_"};
+        static Symbol InterfaceCastFuncPerfix {"_Icast_"};
 
         static Symbol Main {"main"}; // main function name
         static Symbol VirtualTableAsField {"_vt"}; // name for class field with vtable pointer type.
@@ -122,7 +125,11 @@ namespace tinycplus {
                 || s == KwInterface
                 || s == KwVirtual
                 || s == KwOverride
-                || s == KwAbstract;
+                || s == KwAbstract
+                || s == KwAccessPublic
+                || s == KwAccessPrivate
+                || s == KwAccessProtected
+                ;
         }
 
         bool static isReservedName(Symbol const & s) {
@@ -131,7 +138,7 @@ namespace tinycplus {
                 return true;
             }
             if (isParsebleKeyword(s)) return true;
-            if (s == KwThis || s == KwBase) return true;
+            if (s == KwThis || s == KwBase || s == KwNull) return true;
             return false;
         }
 

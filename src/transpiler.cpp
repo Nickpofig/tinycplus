@@ -42,7 +42,23 @@ namespace tinycplus {
             printIdentifier(symbols::KwThis);
             printSymbol(Symbol::ParClose);
         } else {
-            printIdentifier(ast->name);
+            auto interfaceType = ast->getType()->getCore<Type::Interface>();
+            if (interfaceType != nullptr) {
+                auto parent = peekAst();
+                if (parent->as<ASTCall>()
+                    || parent->as<ASTAssignment>()
+                    || parent->as<ASTVarDecl>()
+                    || parent->as<ASTCast>()
+                ) {  // pass as is for (call, assignments, declarations, cast)
+                    printIdentifier(ast->name);
+                } else { // submit class instance whenever possible
+                    printIdentifier(ast->name);
+                    printSymbol(Symbol::Dot);
+                    printIdentifier(symbols::InterfaceTargetAsField);
+                }
+            } else {
+                printIdentifier(ast->name);
+            }
         }
     }
 
@@ -199,6 +215,25 @@ namespace tinycplus {
         printer_.newline();
         pushAst(ast);
 
+        // * null pointer declaration
+        {
+            printType(types_.getTypeVoidPtr());
+            printSpace();
+            printIdentifier(symbols::KwNull);
+            printSpace();
+            printSymbol(Symbol::Assign);
+            printSpace();
+            printSymbol(Symbol::KwCast);
+            printSymbol(Symbol::Lt);
+            printType(types_.getTypeVoidPtr());
+            printSymbol(Symbol::Gt);
+            printSymbol(Symbol::ParOpen);
+            printNumber(0);
+            printSymbol(Symbol::ParClose);
+            printSymbol(Symbol::Semicolon);
+            printNewline();
+        }
+
         // * default interface view struct
         {
             printKeyword(Symbol::KwStruct);
@@ -218,6 +253,7 @@ namespace tinycplus {
 
         // * default vtable struct
         {
+            
             printFunctionPointerType(types_.castToClassFuncPtrType);
             printFunctionPointerType(types_.getImplFuncPtrType);
 
@@ -345,7 +381,6 @@ namespace tinycplus {
         printScopeOpen();
         printFields(implFields);
         printScopeClose(true);
-        /// TODO:
         // * cast to interface function
         printCastToInterfaceFunction(type);
         popAst();
@@ -440,6 +475,7 @@ namespace tinycplus {
 
             // ** "cast to class" function
             printCastToClassFunction(classType);
+            printGetImplFunction(classType);
         }
         popAst();
     }
@@ -650,6 +686,10 @@ namespace tinycplus {
     }
 
     void Transpiler::visit(ASTAddress * ast) {
+        auto interfaceType = ast->getType()->getCore<Type::Interface>();
+        if (interfaceType) {
+            throw ParserError{STR("TRANS: cannot get address of interface!"), ast->location()};
+        }
         pushAst(ast);
         {
             printSymbol(Symbol::BitAnd);
@@ -659,6 +699,10 @@ namespace tinycplus {
     }
 
     void Transpiler::visit(ASTDeref * ast) {
+        auto interfaceType = ast->getType()->getCore<Type::Interface>();
+        if (interfaceType) {
+            throw ParserError{STR("TRANS: cannot dereference interface!"), ast->location()};
+        }
         pushAst(ast);
         {
             printSymbol(Symbol::Mul);
@@ -668,6 +712,10 @@ namespace tinycplus {
     }
 
     void Transpiler::visit(ASTIndex * ast) {
+        auto interfaceType = ast->getType()->getCore<Type::Interface>();
+        if (interfaceType) {
+            throw ParserError{STR("TRANS: cannot use indecies with interface!"), ast->location()};
+        }
         pushAst(ast);
         visitChild(ast->base.get());
         printSymbol(Symbol::SquareOpen);
