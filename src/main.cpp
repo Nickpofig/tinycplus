@@ -59,9 +59,9 @@ void main(int argc, char ** argv) {
     tiny::config.parse(argc, argv);
     // flags check
     auto inputFilepath = tiny::config.input();
-    bool isParseOnly = !tiny::config.setDefaultIfMissing(keyParseOnly, "");;
+    bool isParseOnly = !tiny::config.setDefaultIfMissing(keyParseOnly, "");
     bool isPrintColorful = !tiny::config.setDefaultIfMissing(keyColorful, "");
-    bool isConvertingTinycToCPP = !tiny::config.setDefaultIfMissing(keyTinyCtoCpp, "");;
+    bool isConvertingTinycToCPP = !tiny::config.setDefaultIfMissing(keyTinyCtoCpp, "");
     // entry check
     tiny::config.setDefaultIfMissing(keyEntry, tinycplus::symbols::NoEntry.name());
     tinycplus::symbols::Entry = tiny::Symbol{tiny::config.get(keyEntry)};
@@ -70,6 +70,7 @@ void main(int argc, char ** argv) {
         throw std::runtime_error(program_errors::no_input);
     }
     if (isConvertingTinycToCPP) {
+        std::cout << "Input file: " << inputFilepath << std::endl;
         tinycToCpp::execute(inputFilepath);
         return;
     }

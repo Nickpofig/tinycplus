@@ -36,7 +36,6 @@ namespace tinycplus {
             printKeyword(Symbol::KwCast);
             printSymbol(Symbol::Lt);
             printType(ast->getType()->toString());
-            printType(Symbol::Mul);
             printSymbol(Symbol::Gt);
             printSymbol(Symbol::ParOpen);
             printIdentifier(symbols::KwThis);
@@ -86,12 +85,12 @@ namespace tinycplus {
 
     void Transpiler::visit(ASTNamedType * ast) {
         pushAst(ast);
-        // auto * type = ast->getType()->as<Type::Class>();
-        // if (type == types_.defaultClassType) {
-        //     printType(Symbol::KwVoid);
-        // } else {
+        auto * type = ast->getType()->as<Type::Class>();
+        if (type == types_.defaultClassType) {
+            printType(Symbol::KwVoid);
+        } else {
             printType(ast->name.name());
-        // }
+        }
         popAst();
     }
 
@@ -159,15 +158,11 @@ namespace tinycplus {
                     printSymbol(Symbol::ParOpen);
                     printIdentifier(symbols::KwThis);
                     printSymbol(Symbol::ParClose);
-                    printSymbol(Symbol::Comma);
-                    printSpace();
                     // *** other arguments
-                    if (base.args.size() > 0) {
-                        printIdentifier(base.args[0]->name);
-                        for (size_t i = 1; i < base.args.size(); i++) {
-                            printSymbol(Symbol::Comma);
-                            printIdentifier(base.args[i]->name);
-                        }
+                    for (size_t i = 0; i < base.args.size(); i++) {
+                        printSymbol(Symbol::Comma);
+                        printSpace();
+                        printIdentifier(base.args[i]->name);
                     }
                     printSymbol(Symbol::ParClose);
                     printSymbol(Symbol::Semicolon);
@@ -222,17 +217,18 @@ namespace tinycplus {
 
     void Transpiler::visit(ASTProgram * ast) {
         pushAst(ast);
+        printComment(" --- Generated program globals --- ");
 
         {
             // * "default class" struct declaration
-            printKeyword(Symbol::KwStruct);
-            printSpace();
-            printIdentifier(symbols::KwObject);
-            printScopeOpen();
-            printScopeClose(true);
+            // printKeyword(Symbol::KwStruct);
+            // printSpace();
+            // printIdentifier(symbols::KwObject);
+            // printScopeOpen();
+            // printScopeClose(true);
 
             // * null pointer declaration
-            printType(types_.getTypeDefaultClassPtr());
+            printType(types_.getTypeVoidPtr());
             printSpace();
             printIdentifier(symbols::KwNull);
             printSpace();
@@ -240,7 +236,7 @@ namespace tinycplus {
             printSpace();
             printSymbol(Symbol::KwCast);
             printSymbol(Symbol::Lt);
-            printType(types_.getTypeDefaultClassPtr());
+            printType(types_.getTypeVoidPtr());
             printSymbol(Symbol::Gt);
             printSymbol(Symbol::ParOpen);
             printNumber(0);
@@ -284,6 +280,21 @@ namespace tinycplus {
             printNewline();
         }
 
+        // Forward decalration of all class types
+        std::vector<Type::Class*> classTypes;
+        types_.findEachClassType(classTypes);
+        printComment(" --- Classes --- ");
+        for (auto * classType : classTypes) {
+            if (classType == types_.defaultClassType) continue;
+            printKeyword(Symbol::KwStruct);
+            printSpace();
+            printIdentifier(classType->name);
+            printSymbol(Symbol::Semicolon);
+            printNewline();
+        }
+
+        printComment(" --- User program starts --- ");
+
         for (auto & i : ast->body) {
             visitChild(i.get());
             printer_.newline();
@@ -326,7 +337,7 @@ namespace tinycplus {
             printSpace();
             visitChild(ast->value.get());
         }
-        if (parentAst->as<ASTBlock>()
+        if (parentAst->as<ASTProgram>()
             || parentAst->as<ASTStructDecl>()
             || parentAst->as<ASTClassDecl>()
             || parentAst->as<ASTInterfaceDecl>())
@@ -405,6 +416,7 @@ namespace tinycplus {
 
 
     void Transpiler::visit(ASTClassDecl * ast) {
+        if (!ast->isDefinition) return; // forward declarations for all class types comes at the program start
         pushAst(ast);
         validateName(ast->name);
         auto * classType = ast->getType()->as<Type::Class>();
@@ -479,21 +491,21 @@ namespace tinycplus {
                 }
             }
 
-            if (!classType->isAbstract()) {
-                // ** all implemented interface instances
-                for (auto & it : classType->interfaces) {
-                    printField(it.second->implStructName, getClassImplInstanceName(it.second, classType));
-                    printNewline();
-                }
-
-                // ** setup function declaration
+            // ** all implemented interface instances
+            for (auto & it : classType->interfaces) {
+                printField(it.second->implStructName, getClassImplInstanceName(it.second, classType));
                 printNewline();
-                printClassSetupFunction(classType);
             }
 
             // ** "cast to class" function
             printCastToClassFunction(classType);
             printGetImplFunction(classType);
+
+            if (!classType->isAbstract()) {
+                // ** setup function declaration
+                printNewline();
+                printClassSetupFunction(classType);
+            }
         }
         popAst();
     }

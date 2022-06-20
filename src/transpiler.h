@@ -366,7 +366,7 @@ namespace tinycplus {
                     printSymbol(Symbol::ParOpen);
                     { // vtable get implementation call
                         printIdentifier(localVtableName);
-                        printSymbol(Symbol::Dot);
+                        printSymbol(Symbol::ArrowR);
                         printIdentifier(symbols::VirtualTableGetImplField);
                         printSymbol(Symbol::ParOpen);
                         printNumber(type->getId());
@@ -580,8 +580,6 @@ namespace tinycplus {
                 printSymbol(Symbol::Mul);
                 printSpace();
                 printIdentifier(symbols::KwThis);
-                printSymbol(Symbol::Comma);
-                printSpace();
             }
             printSymbol(Symbol::ParClose);
             printSpace();
@@ -646,8 +644,10 @@ namespace tinycplus {
                 printSymbol(Symbol::Mul);
                 printSpace();
                 printIdentifier(symbols::KwThis);
-                printSymbol(Symbol::Comma);
-                printSpace();
+                if (ast->args.size() > 0) {
+                    printSymbol(Symbol::Comma);
+                    printSpace();
+                }
             }
             auto arg = ast->args.begin();
             if (arg != ast->args.end()) {
@@ -750,9 +750,16 @@ namespace tinycplus {
         void printInterfaceMethodCall(ASTMember * member, ASTCall * call, Type::Interface * interfaceType) {
             auto methodName = call->function->as<ASTIdentifier>();
             auto baseAsIdent = member->base->as<ASTIdentifier>();
+            printKeyword(Symbol::KwCast);
+            printSymbol(Symbol::Lt);
+            printType(interfaceType->implStructName);
+            printType(Symbol::Mul);
+            printSymbol(Symbol::Gt);
+            printSymbol(Symbol::ParOpen);
             printIdentifier(baseAsIdent->name);
             printSymbol(Symbol::Dot);
             printIdentifier(symbols::InterfaceImplAsField);
+            printSymbol(Symbol::ParClose);
             printSymbol(Symbol::ArrowR);
             printIdentifier(methodName->name);
             // * arguments

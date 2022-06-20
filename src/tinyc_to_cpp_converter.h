@@ -6,6 +6,9 @@ namespace tinycToCpp {
         std::ifstream input;
         input.exceptions(std::ifstream::failbit | std::ifstream::badbit);
         input.open(filename);
+        if (!input) {
+            throw std::runtime_error(STR("Cannot open file at path: " << filename));
+        }
         std::string content;
         char c;
         while (input.get(c)) {

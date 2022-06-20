@@ -536,11 +536,12 @@ namespace tinycplus {
     /* VAR_DECLS := VAR_DECL { ',' VAR_DECL }
         */
     std::unique_ptr<AST> Parser::VAR_DECLS() {
-        std::unique_ptr<ASTSequence> result{new ASTSequence{top()}};
-        result->body.push_back(VAR_DECL(false));
-        while (condPop(Symbol::Comma))
-            result->body.push_back(VAR_DECL(false));
-        return result;
+        return VAR_DECL(false);
+        // std::unique_ptr<ASTSequence> result{new ASTSequence{top()}};
+        // result->body.push_back(VAR_DECL(false));
+        // while (condPop(Symbol::Comma))
+        //     result->body.push_back(VAR_DECL(false));
+        // return result;
     }
 
     /* EXPR := E9 [ '=' EXPR ]
