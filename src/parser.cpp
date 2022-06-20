@@ -94,6 +94,7 @@ namespace tinycplus {
         }
         std::unique_ptr<ASTFunDecl> result{new ASTFunDecl{token, std::move(type)}};
         result->kind = kind;
+        result->access = accessMod;
         result->name = token.valueSymbol();
         pop(Symbol::ParOpen);
         if (top() != Symbol::ParClose) {
@@ -199,6 +200,10 @@ namespace tinycplus {
         pop(Symbol::ParOpen);
         result->cond = EXPR();
         pop(Symbol::ParClose);
+        if (top() != Symbol::CurlyOpen) throw ParserError {
+            STR("If statement must start with curly braces!"),
+            top().location()
+        };
         result->trueCase = STATEMENT();
         if (condPop(Symbol::KwElse))
             result->falseCase = STATEMENT();
@@ -253,6 +258,10 @@ namespace tinycplus {
         pop(Symbol::ParOpen);
         result->cond = EXPR();
         pop(Symbol::ParClose);
+        if (top() != Symbol::CurlyOpen) throw ParserError {
+            STR("While statement must start with curly braces!"),
+            top().location()
+        };
         result->body = STATEMENT();
         return result;
     }
@@ -261,6 +270,10 @@ namespace tinycplus {
         */
     std::unique_ptr<AST> Parser::DO_WHILE_STMT() {
         std::unique_ptr<ASTDoWhile> result{new ASTDoWhile{pop(Symbol::KwDo)}};
+        if (top() != Symbol::CurlyOpen) throw ParserError {
+            STR("If statement must start with curly braces!"),
+            top().location()
+        };
         result->body = STATEMENT();
         pop(Symbol::KwWhile);
         pop(Symbol::ParOpen);
@@ -284,6 +297,10 @@ namespace tinycplus {
         if (top() != Symbol::ParClose)
             result->increment = EXPR();
         pop(Symbol::ParClose);
+        if (top() != Symbol::CurlyOpen) throw ParserError {
+            STR("If statement must start with curly braces!"),
+            top().location()
+        };
         result->body = STATEMENT();
         return result;
     }
@@ -338,12 +355,16 @@ namespace tinycplus {
             if (!canBeVoid)
                 result.reset(new ASTPointerType{pop(Symbol::Mul), std::move(result)});
         } else {
-            if (top() == Symbol::KwInt || top() == Symbol::KwChar || top() == Symbol::KwDouble)
+            if (top() == Symbol::KwInt
+                || top() == Symbol::KwChar
+                || top() == Symbol::KwDouble
+                || top() == symbols::KwObject
+            ) {
                 result.reset(new ASTNamedType{pop()});
-            else if (isIdentifier(top()) && isTypeName(top().valueSymbol()))
+            } else if (isIdentifier(top()) && isTypeName(top().valueSymbol())) {
                 result.reset(new ASTNamedType{pop()});
-            else {
-                throw ParserError(STR("Expected type, but " << top() << " found"), top().location(), eof());
+            } else {
+                throw ParserError(STR("PARSER: expected type, but " << top() << " found"), top().location(), eof());
             }
         }
         // deal with pointers to pointers
@@ -367,11 +388,11 @@ namespace tinycplus {
         std::unique_ptr<ASTStructDecl> decl{new ASTStructDecl{start, pop(Token::Kind::Identifier).valueSymbol()}};
         addTypeName(decl->name);
         if (condPop(Symbol::CurlyOpen)) {
+            decl->isDefinition = true;
             while (! condPop(Symbol::CurlyClose)) {
                 decl->fields.push_back(VAR_DECL(false));
                 pop(Symbol::Semicolon);
             }
-            decl->isDefinition = true;
         }
         pop(Symbol::Semicolon);
         return decl;
@@ -433,9 +454,13 @@ namespace tinycplus {
         addTypeName(className);
         // Parses base class
         if (condPop(Symbol::Colon)) {
-            classDecl->baseClass = TYPE();
-            while(condPop(Symbol::Comma)) {
-                classDecl->interfaces.push_back(TYPE());
+            if (top() != Symbol::Colon) {
+                classDecl->baseClass = TYPE();
+            }
+            if (condPop(Symbol::Colon)) {
+                do {
+                    classDecl->interfaces.push_back(TYPE());
+                } while(condPop(Symbol::Comma));
             }
         }
         // Parses body
@@ -464,9 +489,6 @@ namespace tinycplus {
                 }
                 member.release();
             }
-            // if (!undefinedMethods.empty()) {
-            //     auto * ast = *undefinedMethods.begin();
-            // }
         }
         pop(Symbol::Semicolon);
         this->className = std::nullopt;

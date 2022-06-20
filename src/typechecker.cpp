@@ -69,16 +69,33 @@ namespace tinycplus {
     }
 
     void TypeChecker::visit(ASTPointerType * ast) {
-        return ast->setType(types_.getOrCreatePointerType(visitChild(ast->base)));
+        isProcessingPointerType = true;
+        auto * baseType = visitChild(ast->base);
+        isProcessingPointerType = false;
+        return ast->setType(types_.getOrCreatePointerType(baseType));
     }
 
     void TypeChecker::visit(ASTArrayType * ast) {
         // treat array as pointer
-        return ast->setType(types_.getOrCreatePointerType(visitChild(ast->base)));
+        isProcessingPointerType = true;
+        auto * baseType = visitChild(ast->base);
+        isProcessingPointerType = false;
+        return ast->setType(types_.getOrCreatePointerType(baseType));
     }
 
-    void TypeChecker::visit(ASTNamedType * ast) { 
-        return ast->setType(types_.getType(ast->name));
+    void TypeChecker::visit(ASTNamedType * ast) {
+        auto * type = types_.getType(ast->name);
+        if (!isProcessingPointerType && currentClassType == nullptr) {
+            if (type == types_.defaultClassType) throw ParserError {
+                STR("TYPECHECK: default object type can be used only as pointer type!"),
+                ast->location()
+            };
+            if (type->as<Type::Interface>()) throw ParserError {
+                STR("TYPECHECK: interface type can be used only as pointer type!"),
+                ast->location()
+            };
+        }
+        return ast->setType(type);
     }
 
     void TypeChecker::visit(ASTSequence * ast) { 
@@ -102,8 +119,9 @@ namespace tinycplus {
         names_.leaveCurrentScope();
     }
 
-    void TypeChecker::visit(ASTProgram * ast) { 
+    void TypeChecker::visit(ASTProgram * ast) {
         names_.enterBlockScope();
+        names_.addGlobalVariable(symbols::KwNull, types_.getTypeDefaultClassPtr());
         // Sets default result type of a block as void if non other type has been set
         for (auto & i : ast->body) {
             auto * statementResultType = visitChild(i);
@@ -182,6 +200,7 @@ namespace tinycplus {
      */
     void TypeChecker::visit(ASTClassDecl * ast) {
         auto * type = types_.getOrCreateClassType(ast->name);
+        currentClassType = type;
         // adding default constructor function type
         types_.getOrCreateFunctionType(std::unique_ptr<Type::Function>{new Type::Function{type}});
         updatePartialDecl(type, ast);
@@ -195,8 +214,15 @@ namespace tinycplus {
                 ast->location()
             };
             type->setBase(baseType);
+        } else {
+            type->setBase(types_.defaultClassType);
         }
         if (ast->isDefinition) {
+            for (auto & it : ast->interfaces) {
+                auto * interfaceType = visitChild(it)->as<Type::Interface>();
+                type->addInterfaceType(interfaceType);
+            }
+
             for (auto & i : ast->fields) {
                 auto position = push<Context::Complex>({type});
                 visitChild(i);
@@ -219,18 +245,25 @@ namespace tinycplus {
                 //     ast->location()
                 // };
             }
+
+            // removes default constructor from usage
+            if (ast->constructors.size() > 0 && !type->hasOverridedDefaultConstructor()) {
+                type->constructors.erase(type->defaultConstructorFuncType);
+            }
+
             if (baseType != nullptr) {
-                bool baseHasConstructor = baseType->constructors.size() > 0;
+                bool baseHasConstructor = baseType->hasExplicitConstructros();
                 if (baseHasConstructor && !baseConstructorIsUsed) throw ParserError{
                     STR("TYPECHECK: at least one base constructor must be used."),
                     ast->location()
                 };
-            }
-            for (auto & it : ast->interfaces) {
-                auto * interfaceType = visitChild(it)->as<Type::Interface>();
-                type->addInterfaceType(interfaceType);
+                if (baseHasConstructor && !type->hasExplicitConstructros()) throw ParserError{
+                    STR("TYPECHECK: base constructor must be implemented."),
+                    ast->location()
+                };
             }
         }
+        currentClassType = nullptr;
     }
 
     /** Typechecking a function pointer declaration creates the type.
@@ -442,7 +475,7 @@ namespace tinycplus {
 
     void TypeChecker::visit(ASTMember * ast) {
         auto * baseType = visitChild(ast->base);
-        auto position = push<Context::Member>({baseType->getCore<Type::Complex>()});
+        auto position = push<Context::Member>({baseType->unwrap<Type::Complex>()});
         auto memberType = visitChild(ast->member);
         if (memberType == nullptr) {
             throw ParserError{
@@ -459,6 +492,29 @@ namespace tinycplus {
                 STR("Expected value type, but target type is \"" << baseType->toString() << "\""),
                 ast->base->location()
             };
+        }
+        if (auto * memberAsIdent = ast->member->as<ASTIdentifier>()) {
+            auto memberName = memberAsIdent->name;
+            if (auto * classType = baseType->unwrap<Type::Class>()) {
+                Type::Class * originClassType = nullptr;
+                auto access = classType->getMemberAccessMod(memberName, &originClassType);
+                switch (access)
+                {
+                case AccessMod::Private:
+                    if (currentClassType == nullptr || currentClassType != originClassType) throw ParserError {
+                        STR("TYPECHECK: cant access private memeber: " << memberName),
+                        ast->member->location()
+                    };
+                    break;
+                case AccessMod::Protected:
+                    // std::cout << "DEBUG: Protected origin class: " << (originClassType != nullptr ? originClassType->toString() : "null") << std::endl;
+                    if (currentClassType == nullptr || !currentClassType->inherits(originClassType)) throw ParserError {
+                        STR("TYPECHECK: cant access protected memeber: " << memberName),
+                        ast->member->location()
+                    };
+                    break;
+                }
+            }
         }
         ast->setType(memberType);
         wipeContext(position);
@@ -490,74 +546,76 @@ namespace tinycplus {
                 ident->setType(methodType.value());
             }
         } else {
-            if (context.has_value()) push(context.value());
-            visitChild(ast->function);
-        }
-
-        Type::Class * classType = nullptr; // constructor call
-        if (auto * namedTypeAst = ast->function->as<ASTNamedType>()) {
-            if (auto * constructorType = types_.getType(namedTypeAst->name)) {
-                classType = constructorType->as<Type::Class>();
+            Type::Class * classType = nullptr; // constructor call
+            if (auto * namedTypeAst = ast->function->as<ASTNamedType>()) {
+                classType = types_.getType(namedTypeAst->name)->as<Type::Class>();
             }
-        }
-
-        if (classType != nullptr) {
-            std::vector<Type*> argTypes;
-            for (size_t i = 0; i < ast->args.size(); ++i) {
-                auto * argType = visitChild(ast->args[i]);
-                argTypes.push_back(argType);
-            }
-            bool constructorIsFound = classType->constructors.size() == 0;
-            if (!constructorIsFound) {
-                for (auto * f : classType->constructors) {
-                    bool argsAreEqual = true;
-                    if (argTypes.size() != f->numArgs()) continue;
-                    for (size_t i = 0; i < f->numArgs(); i++) {
-                        auto * argType = f->argType(i);
-                        if (argType != argTypes[i]) {
-                            argsAreEqual = false;
+            if (classType != nullptr) {
+                std::vector<Type*> argTypes;
+                for (size_t i = 0; i < ast->args.size(); ++i) {
+                    auto * argType = visitChild(ast->args[i]);
+                    argTypes.push_back(argType);
+                }
+                Type::Function * constructorFunction = nullptr;
+                if (classType->constructors.size() == 0) {
+                    std::unique_ptr<Type::Function> func{new Type::Function{classType}};
+                    constructorFunction = types_.getOrCreateFunctionType(std::move(func));
+                }
+                if (constructorFunction == nullptr) {
+                    for (auto & it : classType->constructors) {
+                        bool argsAreEqual = true;
+                        auto funcType = it.first;
+                        if (argTypes.size() != funcType->numArgs()) continue;
+                        for (size_t i = 0; i < funcType->numArgs(); i++) {
+                            auto * argType = funcType->argType(i);
+                            if (argType != argTypes[i]) {
+                                argsAreEqual = false;
+                                break;
+                            }
+                        }
+                        if (argsAreEqual) { 
+                            constructorFunction = funcType;
                             break;
                         }
                     }
-                    if (argsAreEqual) { 
-                        constructorIsFound = true;
-                        break;
-                    }
                 }
-            }
-            if (!constructorIsFound) {
-                throw ParserError {
-                    STR("TYPECHECK: no matching constructor of class (" << classType->toString() << ") was found."),
-                    ast->location()
-                };
-            }
-            return ast->setType(classType);
-        } else {
-            Type::Function const * f = asFunctionType(ast->function->getType());
-            if (f == nullptr) {
-                throw ParserError {
-                    STR("TYPECHECK: expected function, but value of " << ast->function->getType()->toString() << " found"), ast->location()
-                };
-            }
-            if (ast->args.size() != f->numArgs() - methodOffset) throw ParserError {
-                STR("TYPECHECK: function of type " << f->toString() << " requires "
-                    << f->numArgs() - methodOffset
-                    << " arguments, but " << ast->args.size() << " given"),
-                ast->location()
-            };
-            for (size_t i = 0; i < ast->args.size(); ++i) {
-                auto * argType = visitChild(ast->args[i]);
-                auto * expectedArgType = f->argType(i + methodOffset);
-                if (argType != expectedArgType) {
-                    throw ParserError{
-                        STR("TYPECHECK: type " << expectedArgType->toString() << " expected for argument " << (i + 1)
-                            << ", but " << argType->toString() << " found"),
-                        ast->args[i]->location()
+                if (constructorFunction == nullptr) {
+                    throw ParserError {
+                        STR("TYPECHECK: no matching constructor of class (" << classType->toString() << ") was found."),
+                        ast->location()
                     };
                 }
+                ast->function->setType(constructorFunction);
+                return ast->setType(classType);
             }
-            return ast->setType(f->returnType());
+
+            visitChild(ast->function);
         }
+
+        Type::Function const * f = asFunctionType(ast->function->getType());
+        if (f == nullptr) {
+            throw ParserError {
+                STR("TYPECHECK: expected function, but value of " << ast->function->getType()->toString() << " found"), ast->location()
+            };
+        }
+        if (ast->args.size() != f->numArgs() - methodOffset) throw ParserError {
+            STR("TYPECHECK: function of type " << f->toString() << " requires "
+                << f->numArgs() - methodOffset
+                << " arguments, but " << ast->args.size() << " given"),
+            ast->location()
+        };
+        for (size_t i = 0; i < ast->args.size(); ++i) {
+            auto * argType = visitChild(ast->args[i]);
+            auto * expectedArgType = f->argType(i + methodOffset);
+            if (argType != expectedArgType) {
+                throw ParserError{
+                    STR("TYPECHECK: type " << expectedArgType->toString() << " expected for argument " << (i + 1)
+                        << ", but " << argType->toString() << " found"),
+                    ast->args[i]->location()
+                };
+            }
+        }
+        return ast->setType(f->returnType());
     }
 
     /** Makes sure that incompatible types are not casted.
@@ -571,13 +629,27 @@ namespace tinycplus {
         Type * castType = visitChild(ast->type);
         Type * t = nullptr;
         if (types_.isPointer(castType)) {
-            if (types_.isPointer(valueType) || valueType == types_.getTypeInt())
+            auto * cIntr = castType->unwrap<Type::Interface>();
+            auto * cClass = castType->unwrap<Type::Class>();
+            if (cIntr != nullptr || cClass != nullptr) {
+                auto * vIntr = castType->unwrap<Type::Interface>();
+                auto * vClass = castType->unwrap<Type::Class>();
+                if (types_.isPointer(valueType) && (vIntr != nullptr || vClass != nullptr)) {
+                    t = castType;
+                }
+            } else if (types_.isPointer(valueType) || valueType == types_.getTypeInt()) {
                 t = castType;
+            }
         } else if (castType == types_.getTypeInt()) {
-            if (types_.isPointer(valueType) || types_.isPOD(valueType))
+            if (types_.isPointer(valueType) || types_.isPOD(valueType)) {
                 t = castType;
-        } else if (types_.isPOD(castType) && types_.isPOD(valueType))
+            }
+        } else if (types_.isPOD(castType) && types_.isPOD(valueType)) {
             t = castType;
+        } else throw ParserError {
+            STR("TYPECHECK: invalid cast type or value type"),
+            ast->location()
+        };
         return ast->setType(t);
     }
 

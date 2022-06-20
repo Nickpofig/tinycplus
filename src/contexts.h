@@ -19,9 +19,10 @@ namespace tinycplus {
         Type * double_;
         Type * char_;
         Type * void_;
-    public: // function pointer aliases
+    public: // special tinyC+ types
         Type::Alias * castToClassFuncPtrType;
         Type::Alias * getImplFuncPtrType;
+        Type::Class * defaultClassType;
     public: // constructors
         TypesContext() {
             int_ = types_.insert(std::make_pair(Symbol::KwInt.name(), std::unique_ptr<Type>{new Type::POD{Symbol::KwInt}})).first->second.get();
@@ -33,14 +34,16 @@ namespace tinycplus {
             auto castToClassFunc = std::unique_ptr<Type::Function> { new Type::Function(getTypeVoidPtr()) };
             castToClassFunc->addArgument(getTypeVoidPtr());
             castToClassFunc->addArgument(getTypeInt());
-            auto castToClassFuncPtr = getOrCreateFunctionType(std::move(castToClassFunc));
+            auto * castToClassFuncPtr = getOrCreateFunctionType(std::move(castToClassFunc));
             castToClassFuncPtrType = createTypeAlias(symbols::ClassCastToClassFuncType, castToClassFuncPtr);
 
             // * "get interface impl" function pointer type (int interfaceId)->void*
             auto getImplFunc = std::unique_ptr<Type::Function> { new Type::Function(getTypeVoidPtr()) };
             getImplFunc->addArgument(getTypeInt());
-            auto getImplFuncPtr = getOrCreateFunctionType(std::move(getImplFunc));
+            auto * getImplFuncPtr = getOrCreateFunctionType(std::move(getImplFunc));
             getImplFuncPtrType = createTypeAlias(symbols::ClassGetImplFuncType, getImplFuncPtr);
+
+            defaultClassType = getOrCreateClassType(symbols::KwObject);
         }
 
     public: // getters
@@ -62,6 +65,10 @@ namespace tinycplus {
 
         Type * getTypeVoidPtr() {
             return getOrCreatePointerType(void_);
+        }
+
+        Type * getTypeDefaultClassPtr() {
+            return getOrCreatePointerType(defaultClassType);
         }
 
         Type * getType(Symbol symbol) const {
@@ -131,9 +138,14 @@ namespace tinycplus {
         }
 
         Type::Class * getOrCreateClassType(Symbol name) {
-            auto maker = [name] () {
+            auto maker = [name, this] () {
                 auto * vtable = new Type::VTable{name};
-                return new Type::Class{name, vtable};
+                auto * classType = new Type::Class{name, vtable};
+                auto defaultConstructorType = this->getOrCreateFunctionType(
+                    std::unique_ptr<Type::Function>{new Type::Function{classType}}
+                );
+                classType->addConstructorFunction(defaultConstructorType);
+                return classType;
             };
             return getOrCreateNonAliasType<Type::Class>(name, maker);
         }
@@ -177,6 +189,11 @@ namespace tinycplus {
             auto methodName = methodAst->name.value();
             auto * functionType = methodAst->getType()->as<Type::Function>();
             classType->registerMethod(methodName, functionType, methodAst);
+            bool isInterfaceMethod = classType->isInterfaceMethod(methodName);
+            if (isInterfaceMethod && methodAst->access != AccessMod::Public) throw ParserError {
+                STR("TYPECHECK: interface method implementation must be public!"),
+                methodAst->location()
+            };
             if (methodAst->isVirtualized()) {
                 auto * vtable = classType->getVirtualTable();
                 auto functionPtrTypeName = symbols::makeClassMethodFuncType(classType->name, methodName);

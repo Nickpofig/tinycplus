@@ -438,6 +438,7 @@ namespace tinycplus {
         Virtuality virtuality;
     public:
         FunctionKind kind;
+        AccessMod access = AccessMod::None;
         std::unique_ptr<ASTType> typeDecl;
         std::vector<std::unique_ptr<ASTVarDecl>> args;
         std::unique_ptr<AST> body;

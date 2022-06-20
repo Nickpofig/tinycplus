@@ -35,20 +35,18 @@ namespace tinycplus {
             // downcasts because method belongs to base class
             printKeyword(Symbol::KwCast);
             printSymbol(Symbol::Lt);
-            printType(ast->getType()->getCore<Type::Class>()->toString());
+            printType(ast->getType()->toString());
             printType(Symbol::Mul);
             printSymbol(Symbol::Gt);
             printSymbol(Symbol::ParOpen);
             printIdentifier(symbols::KwThis);
             printSymbol(Symbol::ParClose);
         } else {
-            auto interfaceType = ast->getType()->getCore<Type::Interface>();
+            auto interfaceType = ast->getType()->unwrap<Type::Interface>();
             if (interfaceType != nullptr) {
                 auto parent = peekAst();
-                if (parent->as<ASTCall>()
-                    || parent->as<ASTAssignment>()
+                if (parent->as<ASTAssignment>()
                     || parent->as<ASTVarDecl>()
-                    || parent->as<ASTCast>()
                 ) {  // pass as is for (call, assignments, declarations, cast)
                     printIdentifier(ast->name);
                 } else { // submit class instance whenever possible
@@ -68,8 +66,12 @@ namespace tinycplus {
 
     void Transpiler::visit(ASTPointerType * ast) {
         pushAst(ast);
-        visitChild(ast->base.get());
-        printSymbol(Symbol::Mul);
+        if (ast->base->getType()->as<Type::Interface>()) {
+            printType(symbols::InterfaceViewStruct);
+        } else {
+            visitChild(ast->base.get());
+            printSymbol(Symbol::Mul);
+        }
         popAst();
     }
 
@@ -84,7 +86,12 @@ namespace tinycplus {
 
     void Transpiler::visit(ASTNamedType * ast) {
         pushAst(ast);
-        printType(ast->name.name());
+        // auto * type = ast->getType()->as<Type::Class>();
+        // if (type == types_.defaultClassType) {
+        //     printType(Symbol::KwVoid);
+        // } else {
+            printType(ast->name.name());
+        // }
         popAst();
     }
 
@@ -133,14 +140,15 @@ namespace tinycplus {
                     printIdentifier(symbols::HiddenThis);
                     printSymbol(Symbol::Semicolon);
                     printNewline();
+                    // ** assigns vtable
+                    printVTableInstanceAssignment(classType, true);
                 }
-                // ** assigns vtable
-                printVTableInstanceAssignment(classType, true);
                 // ** call base class constructor init version
                 if (functionAst->base.has_value()) {
                     auto & base = functionAst->base.value();
                     auto baseClassType = types_.getType(base.getName())->as<Type::Class>();
-                    printIdentifier(baseClassType->initName);
+                    auto baseConstructorType = base.name->getType()->as<Type::Function>();
+                    printIdentifier(baseClassType->getConstructorInitName(baseConstructorType));
                     printSymbol(Symbol::ParOpen);
                     // *** passed "this" into init call
                     printKeyword(Symbol::KwCast);
@@ -181,6 +189,7 @@ namespace tinycplus {
                 types_.findEachClassType(classTypes);
                 printComment(" === Initializing virtual tables === ");
                 for (auto * classType : classTypes) {
+                    if (classType == types_.defaultClassType) continue;
                     printIdentifier(classType->setupName);
                     printSymbol(Symbol::ParOpen);
                     printSymbol(Symbol::ParClose);
@@ -212,12 +221,18 @@ namespace tinycplus {
     }
 
     void Transpiler::visit(ASTProgram * ast) {
-        printer_.newline();
         pushAst(ast);
 
-        // * null pointer declaration
         {
-            printType(types_.getTypeVoidPtr());
+            // * "default class" struct declaration
+            printKeyword(Symbol::KwStruct);
+            printSpace();
+            printIdentifier(symbols::KwObject);
+            printScopeOpen();
+            printScopeClose(true);
+
+            // * null pointer declaration
+            printType(types_.getTypeDefaultClassPtr());
             printSpace();
             printIdentifier(symbols::KwNull);
             printSpace();
@@ -225,7 +240,7 @@ namespace tinycplus {
             printSpace();
             printSymbol(Symbol::KwCast);
             printSymbol(Symbol::Lt);
-            printType(types_.getTypeVoidPtr());
+            printType(types_.getTypeDefaultClassPtr());
             printSymbol(Symbol::Gt);
             printSymbol(Symbol::ParOpen);
             printNumber(0);
@@ -291,7 +306,7 @@ namespace tinycplus {
             printSymbol(Symbol::SquareOpen);
             visitChild(arrayType->size.get());
             printSymbol(Symbol::SquareClose);
-        } else if (auto interfaceType = ast->getType()->getCore<Type::Interface>()) {
+        } else if (auto interfaceType = ast->getType()->unwrap<Type::Interface>()) {
             // variable type
             printType(symbols::InterfaceViewStruct);
             printSpace();
@@ -445,6 +460,9 @@ namespace tinycplus {
 
             // ** constructor instance make declarations
             if (ast->constructors.size() == 0) {
+                classConstructorIsIniting = false;
+                printDefaultConstructor(classType);
+                classConstructorIsIniting = true;
                 printDefaultConstructor(classType);
             } else {
                 classConstructorIsIniting = false;
@@ -629,8 +647,10 @@ namespace tinycplus {
         pushAst(ast);
         {
             printKeyword(Symbol::KwReturn);
-            printSpace();
-            visitChild(ast->value.get());
+            if (ast->value) {
+                printSpace();
+                visitChild(ast->value.get());
+            }
         }
         popAst();
     }
@@ -686,7 +706,7 @@ namespace tinycplus {
     }
 
     void Transpiler::visit(ASTAddress * ast) {
-        auto interfaceType = ast->getType()->getCore<Type::Interface>();
+        auto interfaceType = ast->getType()->unwrap<Type::Interface>();
         if (interfaceType) {
             throw ParserError{STR("TRANS: cannot get address of interface!"), ast->location()};
         }
@@ -699,7 +719,7 @@ namespace tinycplus {
     }
 
     void Transpiler::visit(ASTDeref * ast) {
-        auto interfaceType = ast->getType()->getCore<Type::Interface>();
+        auto interfaceType = ast->getType()->unwrap<Type::Interface>();
         if (interfaceType) {
             throw ParserError{STR("TRANS: cannot dereference interface!"), ast->location()};
         }
@@ -712,7 +732,7 @@ namespace tinycplus {
     }
 
     void Transpiler::visit(ASTIndex * ast) {
-        auto interfaceType = ast->getType()->getCore<Type::Interface>();
+        auto interfaceType = ast->getType()->unwrap<Type::Interface>();
         if (interfaceType) {
             throw ParserError{STR("TRANS: cannot use indecies with interface!"), ast->location()};
         }
@@ -742,17 +762,21 @@ namespace tinycplus {
         if (member != nullptr) { // method call
             auto baseType = member->base->getType();
             // std::cout << "DEBUG: member base type is (" << baseType->toString() << ")" << std::endl;
-            if (auto * classType = baseType->getCore<Type::Class>()) {
+            if (auto * classType = baseType->unwrap<Type::Class>()) {
                 printClassMethodCall(member, ast, classType);
-            } else if (auto * interfaceType = baseType->getCore<Type::Interface>()) {
+            } else if (auto * interfaceType = baseType->unwrap<Type::Interface>()) {
                 printInterfaceMethodCall(member, ast, interfaceType);
             } else {
                 printFunctionPointerCall(member, ast);
             }
         } else { // function or global function pointer type variable call
-            auto * classType = ast->function->getType()->as<Type::Class>();
-            if (classType != nullptr) {
-                printIdentifier(classType->makeName);
+            if (auto * classTypeAst = ast->function->as<ASTNamedType>()) {
+                if (auto * classType = types_.getType(classTypeAst->name)->as<Type::Class>()) {
+                    auto constructorFuncType = ast->function->getType()->as<Type::Function>();
+                    assert(constructorFuncType != nullptr);
+                    auto constructorName = classType->getConstructorMakeName(constructorFuncType);
+                    printIdentifier(constructorName);
+                }
             } else {
                 visitChild(ast->function.get());
             }
@@ -773,13 +797,63 @@ namespace tinycplus {
 
     void Transpiler::visit(ASTCast * ast) {
         pushAst(ast);
-        printKeyword(Symbol::KwCast);
-        printSymbol(Symbol::Lt);
-        visitChild(ast->type.get());
-        printSymbol(Symbol::Gt);
-        printSymbol(Symbol::ParOpen);
-        visitChild(ast->value.get());
-        printSymbol(Symbol::ParClose);
+        auto * targetClassType = ast->type->getType()->unwrap<Type::Class>();
+        auto * targetInterfaceType = ast->type->getType()->unwrap<Type::Interface>();
+        auto * subjectClassType = ast->value->getType()->unwrap<Type::Class>();
+        auto * subjectInterfaceType = ast->value->getType()->unwrap<Type::Interface>();
+        if (targetInterfaceType != nullptr) {
+            printIdentifier(targetInterfaceType->castName);
+            printSymbol(Symbol::ParOpen);
+            if (subjectInterfaceType != nullptr) {
+                // "interface to interface" case
+                visitChild(ast->value.get());
+            } else if (subjectClassType != nullptr) {
+                // "class to interface" case
+                printKeyword(Symbol::KwCast);
+                printSymbol(Symbol::Lt);
+                printType(types_.getTypeVoidPtr());
+                printSymbol(Symbol::Gt);
+                printSymbol(Symbol::ParOpen);
+                visitChild(ast->value.get());
+                printSymbol(Symbol::ParClose);
+            }
+            printSymbol(Symbol::ParClose);
+        } else if (targetClassType != nullptr && targetClassType != types_.defaultClassType) {
+            printKeyword(Symbol::KwCast);
+            printSymbol(Symbol::Lt);
+            visitChild(ast->type.get());
+            printSymbol(Symbol::Gt);
+            printSymbol(Symbol::ParOpen);
+            {
+                printIdentifier(targetClassType->classCastName);
+                printSymbol(Symbol::ParOpen);
+                if (subjectInterfaceType != nullptr) {
+                    // "class to interface" case
+                    visitChild(ast->value.get());
+                } else if (subjectClassType != nullptr) {
+                    // "class to class" case
+                    printKeyword(Symbol::KwCast);
+                    printSymbol(Symbol::Lt);
+                    printType(types_.getTypeVoidPtr());
+                    printSymbol(Symbol::Gt);
+                    printSymbol(Symbol::ParOpen);
+                    visitChild(ast->value.get());
+                    printSymbol(Symbol::ParClose);
+                }
+                printSymbol(Symbol::Comma);
+                printNumber(targetClassType->getId());
+                printSymbol(Symbol::ParClose);
+            }
+            printSymbol(Symbol::ParClose);
+        } else {
+            printKeyword(Symbol::KwCast);
+            printSymbol(Symbol::Lt);
+            visitChild(ast->type.get());
+            printSymbol(Symbol::Gt);
+            printSymbol(Symbol::ParOpen);
+            visitChild(ast->value.get());
+            printSymbol(Symbol::ParClose);
+        }
         popAst();
     }
 

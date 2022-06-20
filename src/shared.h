@@ -84,6 +84,7 @@ namespace tinycplus {
         static Symbol KwThis {"this"}; // compulsory first argument of any method, representing reference to the target.
         static Symbol KwBase {"base"}; // cast of "this" to the base type of the current class.
         static Symbol KwNull {"null"}; // null void pointer
+        static Symbol KwObject {"object"}; // default object type
 
         static Symbol ClassMakeConstructorPrefix {"_Cmake_"};
         static Symbol ClassInitConstructorPrefix {"_Cinit_"};
@@ -138,7 +139,7 @@ namespace tinycplus {
                 return true;
             }
             if (isParsebleKeyword(s)) return true;
-            if (s == KwThis || s == KwBase || s == KwNull) return true;
+            if (s == KwThis || s == KwBase || s == KwNull || s == KwObject) return true;
             return false;
         }
 

@@ -16,6 +16,8 @@ namespace tinycplus {
         NamesContext & names_;
         TypesContext & types_;
         std::unordered_map<Type*, bool> typeDefinitionChecks_;
+        Type::Class * currentClassType = nullptr;
+        bool isProcessingPointerType = false;
 
     private: // transpiler case configurations
         struct Context {
@@ -218,20 +220,40 @@ namespace tinycplus {
                 };
             }
             // adds argument types
+            std::unordered_map<Symbol, Type*> argTypeMap;
             for (auto & i : ast->args) {
                 auto * argType = visitChild(i->type);
+                argTypeMap.insert({i->name->name, argType});
                 checkTypeCompletion(argType, i);
                 ftype->addArgument(argType);
             }
             // registers function type
             auto * t = types_.getOrCreateFunctionType(std::move(ftype));
+            if (ast->base.has_value()) {
+                auto baseClassType = classType->getBase();
+                std::unique_ptr<Type::Function> baseConstructorFunction {new Type::Function {baseClassType}};
+                for (auto & it : ast->base->args) {
+                    auto found = argTypeMap.find(it->name);
+                    if (found == argTypeMap.end()) throw ParserError{
+                        STR("TYPECHECK: Unknwon base constructor argument passed."),
+                        ast->location(),
+                    };
+                    baseConstructorFunction->addArgument(found->second);
+                }
+                auto baseConstructorType = types_.getOrCreateFunctionType(std::move(baseConstructorFunction));
+                if (!baseClassType->hasConstructor(baseConstructorType)) throw ParserError{
+                    STR("TYPECHECK: No costructor for given types found in base class"),
+                    ast->location(),
+                };
+                ast->base->name->setType(baseConstructorType);
+            }
             try {
                 addVariable(ast, ast->name.value(), t);
             } catch(std::exception e) {
                 // do nothing
             }
             ast->setType(t);
-            classType->constructors.push_back(t);
+            classType->addConstructorFunction(t);
             // enters the context and add all arguments as local variables
             if (ast->body) {
                 names_.enterFunctionScope(t->returnType());

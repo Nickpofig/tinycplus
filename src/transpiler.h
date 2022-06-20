@@ -164,7 +164,7 @@ namespace tinycplus {
         }
 
         void printFunctionPointerType(Type::Alias * type) {
-            auto * functionType = type->base()->getCore<Type::Function>();
+            auto * functionType = type->base()->unwrap<Type::Function>();
             assert(functionType != nullptr && "oh no, it is not a function pointer type alias");
             // * declaration starts
             printKeyword(Symbol::KwTypedef);
@@ -560,20 +560,34 @@ namespace tinycplus {
         }
 
         void printDefaultConstructor(Type::Class * classType) {
+            if (!classConstructorIsIniting && classType->isAbstract()) return;
             // * return type
-            printType(classType);
+            if (classConstructorIsIniting) {
+                printType(Symbol::KwVoid);
+            } else {
+                printType(classType);
+            }
             printSpace();
             // * name
-            printIdentifier(classType->makeName);
+            printIdentifier(classConstructorIsIniting
+                ? classType->getConstructorInitName(classType->defaultConstructorFuncType)
+                : classType->getConstructorMakeName(classType->defaultConstructorFuncType));
             // * arguments
             printSymbol(Symbol::ParOpen);
+            if (classConstructorIsIniting) {
+                printType(classType->name);
+                printSpace();
+                printSymbol(Symbol::Mul);
+                printSpace();
+                printIdentifier(symbols::KwThis);
+                printSymbol(Symbol::Comma);
+                printSpace();
+            }
             printSymbol(Symbol::ParClose);
             printSpace();
             // * body start
-            printSymbol(Symbol::CurlyOpen);
-            printIndent();
-            printNewline();
-            {
+            printScopeOpen();
+            if (!classConstructorIsIniting) {
                 // ** class instance declaration
                 printType(classType->toString());
                 printSpace();
@@ -582,37 +596,14 @@ namespace tinycplus {
                 printNewline();
                 // ** class instance vtable assignment
                 printVTableInstanceAssignment(classType, false);
-                // // ** class instance field construction (all fields)
-                // std::vector<FieldInfo> fields;
-                // classType->collectFieldsOrdered(fields);
-                // for (auto & field : fields) {
-                //     auto memberType = field.type;
-                //     if (memberType->isPointer()) continue;
-                //     auto * fieldClassType = memberType->as<Type::Complex>();
-                //     if (fieldClassType == nullptr) continue;
-                //     // e.g ~~> this.field = fieldClassConstructor();
-                //     printIdentifier(symbols::KwThis);
-                //     printSymbol(Symbol::Dot);
-                //     printIdentifier(field.name);
-                //     printSpace();
-                //     printSymbol(Symbol::Assign);
-                //     printSpace();
-                //     printIdentifier(fieldClassType->getConstructorName());
-                //     printSymbol(Symbol::ParOpen);
-                //     printSymbol(Symbol::ParClose);
-                //     printSymbol(Symbol::Semicolon);
-                //     printNewline();
-                // }
+                // * return class instance
+                printKeyword(Symbol::KwReturn);
+                printSpace();
+                printIdentifier(symbols::KwThis);
+                printSymbol(Symbol::Semicolon);
             }
-            // * return class instance
-            printKeyword(Symbol::KwReturn);
-            printSpace();
-            printIdentifier(symbols::KwThis);
-            printSymbol(Symbol::Semicolon);
-            printDedent();
-            printNewline();
             // * body end
-            printSymbol(Symbol::CurlyClose);
+            printScopeClose(false);
             printNewline();
         }
 
@@ -633,6 +624,7 @@ namespace tinycplus {
         bool classConstructorIsIniting = true;
         void printConstructor(ASTFunDecl * ast) {
             auto * classType = peekAst()->getType()->as<Type::Class>();
+            auto * funcType = ast->getType()->as<Type::Function>();
             pushAst(ast);
             // * function return type
             if (classConstructorIsIniting) {
@@ -642,7 +634,9 @@ namespace tinycplus {
             }
             printSpace();
             // * function name
-            printIdentifier(classConstructorIsIniting ? classType->initName : classType->makeName);
+            printIdentifier(classConstructorIsIniting
+                ? classType->getConstructorInitName(funcType)
+                : classType->getConstructorMakeName(funcType));
             // registerDeclaration(name.name(), name.name(), 1);
             // * function arguments
             printSymbol(Symbol::ParOpen);
@@ -756,7 +750,7 @@ namespace tinycplus {
         void printInterfaceMethodCall(ASTMember * member, ASTCall * call, Type::Interface * interfaceType) {
             auto methodName = call->function->as<ASTIdentifier>();
             auto baseAsIdent = member->base->as<ASTIdentifier>();
-            visitChild(member->base.get());
+            printIdentifier(baseAsIdent->name);
             printSymbol(Symbol::Dot);
             printIdentifier(symbols::InterfaceImplAsField);
             printSymbol(Symbol::ArrowR);
@@ -765,8 +759,6 @@ namespace tinycplus {
             printSymbol(Symbol::ParOpen);
             {
                 visitChild(member->base.get());
-                printSymbol(Symbol::Dot);
-                printIdentifier(symbols::InterfaceTargetAsField);
                 // * the rest of arguments
                 for(auto & arg : call->args) {
                     printSymbol(Symbol::Comma);
@@ -781,7 +773,7 @@ namespace tinycplus {
             bool isPointerAccess = member->op == Symbol::ArrowR;
             auto methodName = call->function->as<ASTIdentifier>();
             auto methodInfo = classType->getMethodInfo(methodName->name).value();
-            auto * targetClassType = methodInfo.type->argType(0)->getCore<Type::Class>();
+            auto * targetClassType = methodInfo.type->argType(0)->unwrap<Type::Class>();
             auto baseAsIdent = member->base->as<ASTIdentifier>();
             bool isBaseCall = baseAsIdent != nullptr && baseAsIdent->name != symbols::KwBase;
             bool methodIsVirtual = methodInfo.ast->isVirtualized();

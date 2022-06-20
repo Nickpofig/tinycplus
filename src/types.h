@@ -44,7 +44,8 @@ namespace tinycplus {
             return false;
         }
     public: // helpers
-        template<typename T> T * getCore();
+        template<typename T> T * getValueType();
+        template<typename T> T * unwrap();
         template<typename T> T * as() {
             return dynamic_cast<T*>(this);
         }
@@ -386,26 +387,30 @@ namespace tinycplus {
 
     class Type::Class : public Type::Complex {
     public:
+        struct ConstructorInfo {
+            Symbol makeName;
+            Symbol initName;
+        };
+    public:
         const Symbol name;
-        const Symbol makeName;
-        const Symbol initName;
         const Symbol setupName;
         const Symbol classCastName;
         const Symbol getImplName;
-        std::vector<Type::Function*> constructors;
+        Type::Function * defaultConstructorFuncType = nullptr;
+        std::unordered_map<Type::Function*, ConstructorInfo> constructors;
         std::unordered_map<Symbol, Type::Interface * > interfaces;
     private:
         int id_;
+        int constructorId_ = 0;
         Type::Class * base_ = nullptr;
         Type::VTable * vtable_ = nullptr;
         std::unordered_map<Symbol, MethodInfo> functions_;
         bool isAbstract_ = false;
+        int defaultConstructorSetCount = 0;
     public:
         Class(Symbol name, Type::VTable * vtable)
             :name{name}
             ,vtable_{vtable}
-            ,makeName{symbols::start().add(symbols::ClassMakeConstructorPrefix).add(name).end()}
-            ,initName{symbols::start().add(symbols::ClassInitConstructorPrefix).add(name).end()}
             ,setupName{symbols::start().add(symbols::ClassSetupFunctionPrefix).add(name).end()}
             ,classCastName{symbols::start().add(symbols::ClassCastToClassPrefix).add(name).end()}
             ,getImplName{symbols::start().add(symbols::ClassGetImplPrefix).add(name).end()}
@@ -415,6 +420,44 @@ namespace tinycplus {
             id++;
         }
     public:
+        void addConstructorFunction(Type::Function * funcType) {
+            auto makeName = symbols::start().add(symbols::ClassMakeConstructorPrefix).add(STR(constructorId_)).add("_").add(name).end();
+            auto initName = symbols::start().add(symbols::ClassInitConstructorPrefix).add(STR(constructorId_)).add("_").add(name).end();
+            constructorId_++;
+            if (funcType->numArgs() == 0 && defaultConstructorSetCount < 2) {
+                defaultConstructorFuncType = funcType;
+                defaultConstructorSetCount++;
+                constructors.insert_or_assign(funcType, ConstructorInfo{makeName, initName});
+            } else if (!hasConstructor(funcType)) {
+                constructors.insert({funcType, ConstructorInfo{makeName, initName}});
+            } else {
+                throw std::runtime_error(STR("TYPES: Class (" << name.name() << ") already has constructor of type: " << funcType->toString()));
+            }
+        }
+        bool hasOverridedDefaultConstructor() {
+            return defaultConstructorSetCount == 2;
+        }
+        bool hasExplicitConstructros() {
+            return hasOverridedDefaultConstructor() || !hasConstructor(defaultConstructorFuncType);
+        }
+        bool hasConstructor(Type::Function * funcType) {
+            auto it = constructors.find(funcType);
+            return it != constructors.end();
+        }
+        Symbol getConstructorMakeName(Type::Function * funcType) {
+            auto it = constructors.find(funcType);
+            if (it == constructors.end()) {
+                throw std::runtime_error(STR("TYPES: Class (" << name.name() << ") does not have constructor of type: " << funcType->toString()));
+            }
+            return it->second.makeName;
+        }
+        Symbol getConstructorInitName(Type::Function * funcType) {
+            auto it = constructors.find(funcType);
+            if (it == constructors.end()) {
+                throw std::runtime_error(STR("TYPES: Class (" << name.name() << ") does not have constructor of type: " << funcType->toString()));
+            }
+            return it->second.initName;
+        }
         int getId() const {
             return id_;
         }
@@ -424,6 +467,14 @@ namespace tinycplus {
         void setBase(Type::Class * type) {
             base_ = type;
             base_->getVirtualTable()->copyFieldsTo(vtable_);
+        }
+        bool inherits(Type::Class * baseType) {
+            for (auto * it = this; it != nullptr; it = it->base_) {
+                if (it == baseType) {
+                    return true;
+                }
+            }
+            return false;
         }
         void implements(Type::Interface * type) {
             interfaces.insert_or_assign(type->name, type);
@@ -452,6 +503,24 @@ namespace tinycplus {
                 }
             }
             return false;
+        }
+        AccessMod getMemberAccessMod(Symbol name, Type::Class ** resultMemberClass) {
+            *resultMemberClass = this;
+            for (auto & method : functions_) {
+                if (method.first == name) {
+                    return method.second.ast->access;
+                }
+            }
+            for (auto & field : fields_) {
+                if (auto * vardecl = field.second.ast->as<ASTVarDecl>(); vardecl != nullptr && field.first == name) {
+                    return vardecl->access;
+                }
+            }
+            if (base_ != nullptr) {
+                return base_->getMemberAccessMod(name, resultMemberClass);
+            }
+            *resultMemberClass = nullptr;
+            return AccessMod::None;
         }
         std::optional<MethodInfo> getMethodInfo(Symbol name, bool searchInBase = true) const {
             for (auto & method : functions_) {
@@ -564,12 +633,23 @@ namespace tinycplus {
 
 
     template<typename T>
-    T * Type::getCore() { // [?] defined after everything in order to work with fully defined types
+    T * Type::getValueType() { // [?] defined after everything in order to work with fully defined types
         if (auto asIs = dynamic_cast<T*>(this)) {
             return asIs;
         }
         if (auto asPointer = dynamic_cast<Type::Pointer *>(this)) {
-            return asPointer->base()->getCore<T>();
+            return asPointer->base()->getValueType<T>();
+        }
+        return nullptr;
+    }
+
+    template<typename T>
+    T * Type::unwrap() { // [?] defined after everything in order to work with fully defined types
+        if (auto asIs = dynamic_cast<T*>(this)) {
+            return asIs;
+        }
+        if (auto asPointer = dynamic_cast<Type::Pointer *>(this)) {
+            return asPointer->base()->as<T>();
         }
         return nullptr;
     }
