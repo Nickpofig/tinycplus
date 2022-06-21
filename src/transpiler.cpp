@@ -491,17 +491,15 @@ namespace tinycplus {
                 }
             }
 
-            // ** all implemented interface instances
-            for (auto & it : classType->interfaces) {
-                printField(it.second->implStructName, getClassImplInstanceName(it.second, classType));
-                printNewline();
-            }
-
-            // ** "cast to class" function
-            printCastToClassFunction(classType);
-            printGetImplFunction(classType);
-
             if (!classType->isAbstract()) {
+                // ** all implemented interface instances
+                for (auto & it : classType->interfaces) {
+                    printField(it.second->implStructName, getClassImplInstanceName(it.second, classType));
+                    printNewline();
+                }
+                // ** "cast to class" function
+                printCastToClassFunction(classType);
+                printGetImplFunction(classType);
                 // ** setup function declaration
                 printNewline();
                 printClassSetupFunction(classType);
@@ -809,54 +807,8 @@ namespace tinycplus {
 
     void Transpiler::visit(ASTCast * ast) {
         pushAst(ast);
-        auto * targetClassType = ast->type->getType()->unwrap<Type::Class>();
-        auto * targetInterfaceType = ast->type->getType()->unwrap<Type::Interface>();
-        auto * subjectClassType = ast->value->getType()->unwrap<Type::Class>();
-        auto * subjectInterfaceType = ast->value->getType()->unwrap<Type::Interface>();
-        if (targetInterfaceType != nullptr) {
-            printIdentifier(targetInterfaceType->castName);
-            printSymbol(Symbol::ParOpen);
-            if (subjectInterfaceType != nullptr) {
-                // "interface to interface" case
-                visitChild(ast->value.get());
-            } else if (subjectClassType != nullptr) {
-                // "class to interface" case
-                printKeyword(Symbol::KwCast);
-                printSymbol(Symbol::Lt);
-                printType(types_.getTypeVoidPtr());
-                printSymbol(Symbol::Gt);
-                printSymbol(Symbol::ParOpen);
-                visitChild(ast->value.get());
-                printSymbol(Symbol::ParClose);
-            }
-            printSymbol(Symbol::ParClose);
-        } else if (targetClassType != nullptr && targetClassType != types_.defaultClassType) {
-            printKeyword(Symbol::KwCast);
-            printSymbol(Symbol::Lt);
-            visitChild(ast->type.get());
-            printSymbol(Symbol::Gt);
-            printSymbol(Symbol::ParOpen);
-            {
-                printIdentifier(targetClassType->classCastName);
-                printSymbol(Symbol::ParOpen);
-                if (subjectInterfaceType != nullptr) {
-                    // "class to interface" case
-                    visitChild(ast->value.get());
-                } else if (subjectClassType != nullptr) {
-                    // "class to class" case
-                    printKeyword(Symbol::KwCast);
-                    printSymbol(Symbol::Lt);
-                    printType(types_.getTypeVoidPtr());
-                    printSymbol(Symbol::Gt);
-                    printSymbol(Symbol::ParOpen);
-                    visitChild(ast->value.get());
-                    printSymbol(Symbol::ParClose);
-                }
-                printSymbol(Symbol::Comma);
-                printNumber(targetClassType->getId());
-                printSymbol(Symbol::ParClose);
-            }
-            printSymbol(Symbol::ParClose);
+        if (auto classCast = ast->as<ASTClassCast>()) {
+            printClassCast(classCast);
         } else {
             printKeyword(Symbol::KwCast);
             printSymbol(Symbol::Lt);

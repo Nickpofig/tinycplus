@@ -1190,6 +1190,13 @@ namespace tinycplus {
         void accept(ASTVisitor * v) override;
     };
 
+    class ASTClassCast : public ASTCast {
+    public:
+        ASTClassCast(Token const & t, std::unique_ptr<AST> value, std::unique_ptr<ASTType> type)
+            :ASTCast{t, std::move(value), std::move(type)}
+        { }
+    };
+
 
 
 

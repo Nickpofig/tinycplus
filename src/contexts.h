@@ -144,7 +144,7 @@ namespace tinycplus {
                 auto defaultConstructorType = this->getOrCreateFunctionType(
                     std::unique_ptr<Type::Function>{new Type::Function{classType}}
                 );
-                classType->addConstructorFunction(defaultConstructorType);
+                classType->addConstructorFunction(defaultConstructorType, AccessMod::Public);
                 return classType;
             };
             return getOrCreateNonAliasType<Type::Class>(name, maker);

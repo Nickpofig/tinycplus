@@ -199,9 +199,6 @@ namespace tinycplus {
         }
 
         void printVTableStruct(Type::Class * classType) {
-            if (classType->isAbstract()) {
-                return;
-            }
             std::vector<FieldInfo> vtableFields;
             auto * vtableType = classType->getVirtualTable();
             vtableType->collectFieldsOrdered(vtableFields);
@@ -216,13 +213,82 @@ namespace tinycplus {
             printFields(vtableFields);
             printScopeClose(true);
             // * global instance declaration
-            printNewline();
-            printType(vtableType->typeName);
-            printSpace();
-            printIdentifier(vtableType->instanceName);
-            printSymbol(Symbol::Semicolon);
-            printNewline();
-            printNewline();
+            if (!classType->isAbstract()) {
+                printNewline();
+                printType(vtableType->typeName);
+                printSpace();
+                printIdentifier(vtableType->instanceName);
+                printSymbol(Symbol::Semicolon);
+                printNewline();
+                printNewline();
+            }
+        }
+
+        void printClassCast(ASTClassCast * ast) {
+            auto * targetClassType = ast->type->getType()->unwrap<Type::Class>();
+            auto * targetInterfaceType = ast->type->getType()->unwrap<Type::Interface>();
+            auto * subjectClassType = ast->value->getType()->unwrap<Type::Class>();
+            auto * subjectInterfaceType = ast->value->getType()->unwrap<Type::Interface>();
+            if (targetInterfaceType != nullptr) {
+                printIdentifier(targetInterfaceType->castName);
+                printSymbol(Symbol::ParOpen);
+                if (subjectInterfaceType != nullptr) {
+                    // "interface to interface" case
+                    visitChild(ast->value.get());
+                } else if (subjectClassType != nullptr) {
+                    // "class to interface" case
+                    printKeyword(Symbol::KwCast);
+                    printSymbol(Symbol::Lt);
+                    printType(types_.getTypeVoidPtr());
+                    printSymbol(Symbol::Gt);
+                    printSymbol(Symbol::ParOpen);
+                    visitChild(ast->value.get());
+                    printSymbol(Symbol::ParClose);
+                }
+                printSymbol(Symbol::ParClose);
+            } else if (targetClassType != nullptr && targetClassType != types_.defaultClassType) {
+                printKeyword(Symbol::KwCast);
+                printSymbol(Symbol::Lt);
+                visitChild(ast->type.get());
+                printSymbol(Symbol::Gt);
+                printSymbol(Symbol::ParOpen);
+                {
+                    printKeyword(Symbol::KwCast);
+                    printSymbol(Symbol::Lt);
+                    printType(symbols::VirtualTableGeneralStruct);
+                    printType(Symbol::Mul);
+                    printSymbol(Symbol::Gt);
+                    printSymbol(Symbol::ParOpen);
+                    visitChild(ast->value.get());
+                    printSymbol(Symbol::ParClose);
+                    printSymbol(Symbol::ArrowR);
+                    printIdentifier(symbols::VirtualTableCastToClassField);
+                    printSymbol(Symbol::ParOpen);
+                    if (subjectInterfaceType != nullptr) {
+                        visitChild(ast->value.get());
+                    } else if (subjectClassType != nullptr) {
+                        printKeyword(Symbol::KwCast);
+                        printSymbol(Symbol::Lt);
+                        printType(types_.getTypeVoidPtr());
+                        printSymbol(Symbol::Gt);
+                        printSymbol(Symbol::ParOpen);
+                        visitChild(ast->value.get());
+                        printSymbol(Symbol::ParClose);
+                    }
+                    printSymbol(Symbol::Comma);
+                    printNumber(targetClassType->getId());
+                    printSymbol(Symbol::ParClose);
+                }
+                printSymbol(Symbol::ParClose);
+            } else {
+                printKeyword(Symbol::KwCast);
+                printSymbol(Symbol::Lt);
+                visitChild(ast->type.get());
+                printSymbol(Symbol::Gt);
+                printSymbol(Symbol::ParOpen);
+                visitChild(ast->value.get());
+                printSymbol(Symbol::ParClose);
+            }
         }
 
         void printFuncPtrAssignment(

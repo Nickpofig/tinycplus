@@ -390,6 +390,7 @@ namespace tinycplus {
         struct ConstructorInfo {
             Symbol makeName;
             Symbol initName;
+            AccessMod access;
         };
     public:
         const Symbol name;
@@ -420,16 +421,16 @@ namespace tinycplus {
             id++;
         }
     public:
-        void addConstructorFunction(Type::Function * funcType) {
+        void addConstructorFunction(Type::Function * funcType, AccessMod accessMod) {
             auto makeName = symbols::start().add(symbols::ClassMakeConstructorPrefix).add(STR(constructorId_)).add("_").add(name).end();
             auto initName = symbols::start().add(symbols::ClassInitConstructorPrefix).add(STR(constructorId_)).add("_").add(name).end();
             constructorId_++;
             if (funcType->numArgs() == 0 && defaultConstructorSetCount < 2) {
                 defaultConstructorFuncType = funcType;
                 defaultConstructorSetCount++;
-                constructors.insert_or_assign(funcType, ConstructorInfo{makeName, initName});
+                constructors.insert_or_assign(funcType, ConstructorInfo{makeName, initName, accessMod});
             } else if (!hasConstructor(funcType)) {
-                constructors.insert({funcType, ConstructorInfo{makeName, initName}});
+                constructors.insert({funcType, ConstructorInfo{makeName, initName, accessMod}});
             } else {
                 throw std::runtime_error(STR("TYPES: Class (" << name.name() << ") already has constructor of type: " << funcType->toString()));
             }
@@ -457,6 +458,13 @@ namespace tinycplus {
                 throw std::runtime_error(STR("TYPES: Class (" << name.name() << ") does not have constructor of type: " << funcType->toString()));
             }
             return it->second.initName;
+        }
+        AccessMod getConstructorAccess(Type::Function * funcType) {
+            auto it = constructors.find(funcType);
+            if (it == constructors.end()) {
+                throw std::runtime_error(STR("TYPES: Class (" << name.name() << ") does not have constructor of type: " << funcType->toString()));
+            }
+            return it->second.access;
         }
         int getId() const {
             return id_;

@@ -79,6 +79,7 @@ namespace tinycplus {
     std::unique_ptr<AST> Parser::FUN_DECL(FunctionKind kind) {
         auto accessMod = AccessMod::Public;
         bool isForClass = kind == FunctionKind::ClassMethod || kind == FunctionKind::ClassConstructor;
+        auto accessToken = top();
         if (isForClass) {
             accessMod = ACCESS_MOD();
         }
@@ -89,6 +90,10 @@ namespace tinycplus {
         }
         bool isConstructor = kind == FunctionKind::ClassConstructor;
         if (isConstructor) {
+            if (accessMod == AccessMod::Private) throw ParserError {
+                STR("PARSER: constructors are either protected or public!"),
+                accessToken.location()
+            };
         } else {
             token = pop();
         }
@@ -763,19 +768,33 @@ namespace tinycplus {
             std::unique_ptr<AST> expr(EXPR());
             pop(Symbol::ParClose);
             return std::unique_ptr<AST>{new ASTCast{op, std::move(expr), std::move(type)}};
+        } else if (top() == symbols::KwClassCast) {
+            Token op = pop();
+            pop(Symbol::Lt);
+            std::unique_ptr<ASTType> type{TYPE()};
+            pop(Symbol::Gt);
+            pop(Symbol::ParOpen);
+            std::unique_ptr<AST> expr(EXPR());
+            pop(Symbol::ParClose);
+            return std::unique_ptr<AST>{new ASTClassCast{op, std::move(expr), std::move(type)}};
         } else if (top() == Token::Kind::Identifier) {
             return IDENT();
         } else if (condPop(Symbol::ParOpen)) {
             return EXPR();
             pop(Symbol::ParClose);
         } else {
-            throw ParserError(STR("Expected literal, (expr) or cast, but " << top() << " found"), top().location(), eof());
+            throw ParserError(STR("PARSER: expected literal, (expr) or cast, but " << top() << " found"), top().location(), eof());
         }
     }
 
     std::unique_ptr<ASTIdentifier> Parser::IDENT() {
-        if (!isIdentifier(top()) || isTypeName(top().valueSymbol()))
-            throw ParserError(STR("Expected identifier, but " << top() << " found"), top().location(), eof());
+        if (!isIdentifier(top()) || isTypeName(top().valueSymbol())) {
+            throw ParserError(STR("PARSER: expected identifier, but " << top() << " found"), top().location(), eof());
+        }
+        if (top().valueSymbol().name()[0] == '_') throw ParserError {
+            STR("PARSER: domain of identifiers starting with underscores are reserved for compiler use - user's identifier must start with an alphabet character."),
+            top().location(), eof()
+        };
         return std::unique_ptr<ASTIdentifier>{new ASTIdentifier{pop()}};
     }
 }

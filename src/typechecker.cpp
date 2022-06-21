@@ -134,7 +134,6 @@ namespace tinycplus {
         auto * t = visitChild(ast->type);
         checkTypeCompletion(t, ast);
         auto tAsClassType = t->as<Type::Class>();
-        std::cout << "DEBUG: variable " << ast->name->name << "has type " << t->toString() << std::endl;
         if (tAsClassType != nullptr && tAsClassType->isAbstract()) throw ParserError {
             STR("TYPECHECK: Cannot declare value type abstract class instance."),
             ast->location()
@@ -658,6 +657,20 @@ namespace tinycplus {
                         ast->location()
                     };
                 }
+                auto access = classType->getConstructorAccess(constructorFunction);
+                if (access == AccessMod::Protected) {
+                    if (currentClassType == nullptr) {
+                        throw ParserError {
+                            STR("TYPECHECK: cannot call protected constructor outside of derived class!"),
+                            ast->location()
+                        };
+                    } else if (!currentClassType->inherits(classType)) {
+                        throw ParserError {
+                            STR("TYPECHECK: cannot call protected constructor outside of derived class!"),
+                            ast->location()
+                        };
+                    }
+                }
                 ast->function->setType(constructorFunction);
                 return ast->setType(classType);
             }
@@ -701,7 +714,7 @@ namespace tinycplus {
         Type * valueType = visitChild(ast->value);
         Type * castType = visitChild(ast->type);
         Type * t = nullptr;
-        if (types_.isPointer(castType)) {
+        if (auto classCast = ast->as<ASTClassCast>()) {
             auto * cIntr = castType->unwrap<Type::Interface>();
             auto * cClass = castType->unwrap<Type::Class>();
             if (cIntr != nullptr || cClass != nullptr) {
@@ -709,20 +722,29 @@ namespace tinycplus {
                 auto * vClass = castType->unwrap<Type::Class>();
                 if (types_.isPointer(valueType) && (vIntr != nullptr || vClass != nullptr)) {
                     t = castType;
+                } else throw ParserError {
+                    STR("TYPECHECK: invalid cast type or value type, acceptable targets are: class or interface pointer."),
+                    ast->location()
+                };
+            }
+        }
+        else {
+            if (types_.isPointer(castType)) {
+                if (castType->unwrap<Type::Interface>()) throw ParserError {
+                    STR("TYPECHECK: interfaces are not valid targets of \"cast\" operation! Please, use \"classcast\" instead."),
+                    ast->location()
+                };
+                if (types_.isPointer(valueType) || valueType == types_.getTypeInt()) {
+                    t = castType;
                 }
-            } else if (types_.isPointer(valueType) || valueType == types_.getTypeInt()) {
+            } else if (castType == types_.getTypeInt()) {
+                if (types_.isPointer(valueType) || types_.isPOD(valueType)) {
+                    t = castType;
+                }
+            } else if (types_.isPOD(castType) && types_.isPOD(valueType)) {
                 t = castType;
             }
-        } else if (castType == types_.getTypeInt()) {
-            if (types_.isPointer(valueType) || types_.isPOD(valueType)) {
-                t = castType;
-            }
-        } else if (types_.isPOD(castType) && types_.isPOD(valueType)) {
-            t = castType;
-        } else throw ParserError {
-            STR("TYPECHECK: invalid cast type or value type"),
-            ast->location()
-        };
+        }
         return ast->setType(t);
     }
 

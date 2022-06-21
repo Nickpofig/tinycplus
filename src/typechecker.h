@@ -263,7 +263,7 @@ namespace tinycplus {
                 // do nothing
             }
             ast->setType(t);
-            classType->addConstructorFunction(t);
+            classType->addConstructorFunction(t, ast->access);
             // enters the context and add all arguments as local variables
             if (ast->body) {
                 names_.enterFunctionScope(t->returnType());

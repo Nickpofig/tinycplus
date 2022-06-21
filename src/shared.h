@@ -71,6 +71,7 @@ namespace tinycplus {
     };
 
     namespace symbols {
+        static Symbol KwClassCast {"classcast"};
         static Symbol KwClass {"class"}; // TinyC+ class -> special data model representing an object.
         static Symbol KwInterface {"interface"}; // TinyC+ interface -> language polymorphism entity.
         static Symbol KwVirtual {"virtual"}; // marks the method as virtual.
@@ -130,6 +131,7 @@ namespace tinycplus {
                 || s == KwAccessPublic
                 || s == KwAccessPrivate
                 || s == KwAccessProtected
+                || s == KwClassCast
                 ;
         }
 
