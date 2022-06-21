@@ -167,8 +167,8 @@ namespace tinycplus {
             return start().add(InterfaceImplTypePrefix).add(interfaceName).end();
         }
 
-        static Symbol makeInterfaceMethodFuncType(Symbol methodName) {
-            return symbols::start().add(symbols::InterfaceMethodFuncTypePrefix).add(methodName).end();
+        static Symbol makeInterfaceMethodFuncType(Symbol interfaceName, Symbol methodName) {
+            return symbols::start().add(symbols::InterfaceMethodFuncTypePrefix).add(interfaceName).add("_").add(methodName).end();
         }
 
         static Symbol makeClassMethodFuncType(Symbol className, Symbol methodName) {

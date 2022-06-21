@@ -161,6 +161,7 @@ namespace tinycplus {
         }
 
         Type::Alias * createTypeAlias(Symbol name, Type * base) {
+            // std::cout << "DEBUG: alias with name: " << name << std::endl;
             assert(types_.find(name.name()) == types_.end());
             Type::Alias * result = new Type::Alias(name, base);
             types_.insert(std::make_pair(name.name(), std::unique_ptr<Type>{ result }));
@@ -205,7 +206,8 @@ namespace tinycplus {
         void addMethodToInterface(ASTFunDecl * methodAst, Type::Interface * interfaceType) {
             auto methodName = methodAst->name.value();
             auto * functionType = methodAst->getType()->as<Type::Function>();
-            auto functionPtrTypeName = symbols::makeInterfaceMethodFuncType(methodName);
+            auto interfaceName = interfaceType->name;
+            auto functionPtrTypeName = symbols::makeInterfaceMethodFuncType(interfaceName, methodName);
             auto * functionPtrType = createTypeAlias(functionPtrTypeName, getOrCreatePointerType(functionType));
             interfaceType->addMethod(methodName, functionType, functionPtrType);
             interfaceType->vtable->registerField(methodName, functionPtrType, methodAst);

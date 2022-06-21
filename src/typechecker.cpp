@@ -262,6 +262,29 @@ namespace tinycplus {
                     ast->location()
                 };
             }
+
+            for (auto & it : ast->interfaces) {
+                auto * interfaceType = visitChild(it)->as<Type::Interface>();
+                for (auto & m : interfaceType->methods_) {
+                    auto classHasMethod = type->hasMethod(m.first, true);
+                    if (!classHasMethod) throw ParserError {
+                        STR("TRANS: class " << ast->name << " does not implement method [" << m.first << ":" << m.second.type->toString() << "] of interface " << interfaceType->name),
+                        it->location()
+                    };
+                    auto classMethodType = type->getMemberType(m.first)->as<Type::Function>();
+                    bool argsMatches = classMethodType->numArgs() == m.second.type->numArgs();
+                    for (size_t i = 1; argsMatches && i < classMethodType->numArgs(); i++) {
+                        if (classMethodType->argType(i) != m.second.type->argType(i)) {
+                            argsMatches = false;
+                            break;
+                        }
+                    }
+                    if (!argsMatches) throw ParserError {
+                        STR("TRANS: method [" << m.first << ":" << m.second.type->toString() << "] of interface " << interfaceType->name << " does not match arguments in class " << ast->name),
+                        it->location()
+                    };
+                }
+            }
         }
         currentClassType = nullptr;
     }
