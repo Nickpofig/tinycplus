@@ -172,6 +172,11 @@ namespace tinycplus {
             for (auto & i : ast->args) {
                 auto * argType = visitChild(i->type);
                 checkTypeCompletion(argType, i);
+                auto argClassType = argType->as<Type::Class>();
+                if (argClassType != nullptr && argClassType->isAbstract()) throw ParserError {
+                    STR("TYPECHECK: Cannot declare value type abstract class instance."),
+                    ast->location()
+                };
                 ftype->addArgument(argType);
             }
             // registers function type
@@ -225,6 +230,11 @@ namespace tinycplus {
                 auto * argType = visitChild(i->type);
                 argTypeMap.insert({i->name->name, argType});
                 checkTypeCompletion(argType, i);
+                auto argClassType = argType->as<Type::Class>();
+                if (argClassType != nullptr && argClassType->isAbstract()) throw ParserError {
+                    STR("TYPECHECK: Cannot declare value type abstract class instance."),
+                    ast->location()
+                };
                 ftype->addArgument(argType);
             }
             // registers function type
@@ -292,6 +302,11 @@ namespace tinycplus {
             for (auto & i : ast->args) {
                 auto * argType = visitChild(i->type);
                 checkTypeCompletion(argType, i->type);
+                auto argClassType = argType->as<Type::Class>();
+                if (argClassType != nullptr && argClassType->isAbstract()) throw ParserError {
+                    STR("TYPECHECK: Cannot declare value type abstract class instance."),
+                    ast->location()
+                };
                 ftype->addArgument(argType);
             }
             // registers function type
@@ -333,6 +348,11 @@ namespace tinycplus {
             for (auto & i : ast->args) {
                 auto * argType = visitChild(i->type);
                 checkTypeCompletion(argType, i->type);
+                auto argClassType = argType->as<Type::Class>();
+                if (argClassType != nullptr && argClassType->isAbstract()) throw ParserError {
+                    STR("TYPECHECK: Cannot declare value type abstract class instance."),
+                    ast->location()
+                };
                 ftype->addArgument(argType);
             }
             // registers function type

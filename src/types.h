@@ -599,6 +599,11 @@ namespace tinycplus {
             return std::nullopt;
         }
 
+        bool ownField(Symbol name) const {
+            auto fieldInfo = Complex::getFieldInfo(name);
+            return fieldInfo.has_value();
+        }
+
         Type * getMemberType(Symbol name) const override {
             auto field = getFieldInfo(name);
             if (field.has_value()) return field.value().type;

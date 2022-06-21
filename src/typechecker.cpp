@@ -133,6 +133,12 @@ namespace tinycplus {
     void TypeChecker::visit(ASTVarDecl * ast) {
         auto * t = visitChild(ast->type);
         checkTypeCompletion(t, ast);
+        auto tAsClassType = t->as<Type::Class>();
+        std::cout << "DEBUG: variable " << ast->name->name << "has type " << t->toString() << std::endl;
+        if (tAsClassType != nullptr && tAsClassType->isAbstract()) throw ParserError {
+            STR("TYPECHECK: Cannot declare value type abstract class instance."),
+            ast->location()
+        };
         if (ast->value != nullptr) {
             auto * valueType = visitChild(ast->value);
             if (valueType != t)
@@ -224,6 +230,11 @@ namespace tinycplus {
             }
 
             for (auto & i : ast->fields) {
+                auto fieldName = i->name->name;
+                if (baseType && baseType->ownField(fieldName)) throw ParserError{
+                    STR("TYPECHECK: base class has already defined field with name " << fieldName),
+                    i->location()
+                };
                 auto position = push<Context::Complex>({type});
                 visitChild(i);
                 wipeContext(position);
@@ -232,6 +243,41 @@ namespace tinycplus {
                 auto position = push<Context::Complex>({type});
                 visitChild(i);
                 wipeContext(position);
+                auto methodName = i->name.value();
+                if (baseType && baseType->hasMethod(methodName, true)) {
+                    auto baseMethodAst = baseType->getMethodInfo(methodName)->ast;
+                    auto baseIsVirutal = baseMethodAst->isVirtualized();
+                    auto currentIsVirutal = i->isVirtualized();
+                    if (baseIsVirutal && !currentIsVirutal) throw ParserError{
+                        STR("TYPECHECK: base class method with the same name is virtual, but current one is not."),
+                        i->location()
+                    };
+                    if (!baseIsVirutal && currentIsVirutal) throw ParserError{
+                        STR("TYPECHECK: base class method with the same name is not virtual, but current one is."),
+                        i->location()
+                    };
+                    if (!baseIsVirutal && !currentIsVirutal) throw ParserError{
+                        STR("TYPECHECK: base class method already defines method with the same name."),
+                        i->location()
+                    };
+                    if (!i->isOverride()) throw ParserError{
+                        STR("TYPECHECK: method must be declare as override of the base virtual method."),
+                        i->location()
+                    };
+                    auto baseMethodType = i->getType()->as<Type::Function>();
+                    auto currentMethodType = i->getType()->as<Type::Function>();
+                    bool argsMatches = baseMethodType->numArgs() == currentMethodType->numArgs();
+                    for (size_t i = 1; argsMatches && i < baseMethodType->numArgs(); i++) {
+                        if (currentMethodType->argType(i) != baseMethodType->argType(i)) {
+                            argsMatches = false;
+                            break;
+                        }
+                    }
+                    if (!argsMatches) throw ParserError{
+                        STR("TYPECHECK: base class virtual method with the same name differs in arguments with the derived class."),
+                        i->location()
+                    };
+                }
             }
             // checks constructor reuse of base class constructors
             bool baseConstructorIsUsed = false;
@@ -574,6 +620,10 @@ namespace tinycplus {
                 classType = types_.getType(namedTypeAst->name)->as<Type::Class>();
             }
             if (classType != nullptr) {
+                if (classType->isAbstract()) throw ParserError {
+                    STR("TYPECHECK: cannot instantiate abstract class type!"),
+                    ast->location()
+                };
                 std::vector<Type*> argTypes;
                 for (size_t i = 0; i < ast->args.size(); ++i) {
                     auto * argType = visitChild(ast->args[i]);

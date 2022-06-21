@@ -112,7 +112,6 @@ namespace tinycplus {
         }
         pop(Symbol::ParClose);
         if (kind == FunctionKind::ClassMethod) {
-            bool isAbstract_ = false;
             // defines method virtuality
             if (condPop(symbols::KwVirtual)) {
                 result->virtuality = ASTFunDecl::Virtuality::Virtual;
@@ -123,7 +122,7 @@ namespace tinycplus {
             } else {
                 result->virtuality = ASTFunDecl::Virtuality::None;
             }
-            if (!isAbstract_) {
+            if (result->virtuality != ASTFunDecl::Virtuality::Abstract) {
                 result->body = BLOCK_STMT();
             } else if (!condPop(Symbol::Semicolon)) {
                 throw ParserError {
