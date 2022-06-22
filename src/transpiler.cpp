@@ -176,7 +176,7 @@ namespace tinycplus {
                     printSymbol(symbols::HiddenThis);
                     printSymbol(Symbol::Semicolon);
                 }
-            } else if (functionAst->name == symbols::Main) {
+            } else if (functionAst->name == symbols::Entry) {
                 // Program Entry must be fully declared only after all class declarations and never earlier.
                 // Otherwise resulted TinyC code won't compile.
                 programEntryWasDefined_ = true;

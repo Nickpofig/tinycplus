@@ -18,7 +18,7 @@ namespace program_errors {
 }
 
 // declaration for extern Entry
-tiny::Symbol tinycplus::symbols::Entry = tinycplus::symbols::NoEntry;
+tiny::Symbol tinycplus::symbols::Entry = tinycplus::symbols::Main;
 
 const std::string keyColorful = "--colorful";
 const std::string keyEntry = "--entry";
@@ -63,7 +63,7 @@ void main(int argc, char ** argv) {
     bool isPrintColorful = !tiny::config.setDefaultIfMissing(keyColorful, "");
     bool isConvertingTinycToCPP = !tiny::config.setDefaultIfMissing(keyTinyCtoCpp, "");
     // entry check
-    tiny::config.setDefaultIfMissing(keyEntry, tinycplus::symbols::NoEntry.name());
+    tiny::config.setDefaultIfMissing(keyEntry, tinycplus::symbols::Main.name());
     tinycplus::symbols::Entry = tiny::Symbol{tiny::config.get(keyEntry)};
     // file check
     if (!std::filesystem::exists(inputFilepath)) {

@@ -32,9 +32,9 @@ namespace tinycplus {
         { }
     public:
         void validateSelf() {
-            if (!programEntryWasDefined_ && symbols::Entry != symbols::NoEntry) {
-                throw std::runtime_error(STR("Entry function " << symbols::Entry << " was not defined!"));
-            }
+            // if (!programEntryWasDefined_ && symbols::Entry != symbols::Main) {
+            //     throw std::runtime_error(STR("Entry function " << symbols::Entry << " was not defined!"));
+            // }
         }
     private:
         void pushAst(AST * ast) {
