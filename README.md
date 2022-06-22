@@ -57,7 +57,7 @@ Pointers can point to either a plain type, an identifier representing a struct o
 Structured types must always be declared before they are used. Forward declarations are supported as well.
 
     CLASS_DECL := 'class' identifier [ ':' [ identifier ] [ ':' identifier { ',' identifier } ] ] [ '{' { FIELD_DECL | METHOD_DECL } '}' ] ';'
-	METHOD_DECL := FUN_HEAD ( [ 'virtual' | 'override' ] BLOCK_STMT | 'abstract' ';' )
+    METHOD_DECL := FUN_HEAD ( [ 'virtual' | 'override' ] BLOCK_STMT | 'abstract' ';' )
 
 Class is similar to struct, except it:
     * could inherit all content of its base type.

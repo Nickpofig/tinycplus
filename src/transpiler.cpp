@@ -349,7 +349,7 @@ namespace tinycplus {
 
     void Transpiler::visit(ASTFunDecl * ast) {
         if (ast->isClassMethod()) printMethod(ast);
-        else if (ast->isClassConstructor()) printConstructor(ast);
+        else if (ast->isClassConstructor()) printConstructor(ast, false);
         else printFunction(ast);
     }
 

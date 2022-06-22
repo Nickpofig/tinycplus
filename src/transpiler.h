@@ -68,7 +68,7 @@ namespace tinycplus {
         }
         void validateName(Symbol const & name) {
             if (symbols::isReservedName(name)) {
-                throw std::runtime_error{STR("Name " << name << " contains or is a reserved TinyC+ name!")};
+                throw std::runtime_error{STR("Name " << name << " is a reserved TinyC+ name!")};
             }
         }
 
@@ -284,25 +284,35 @@ namespace tinycplus {
 
         void printAllMethodsForwardDeclaration(ASTClassDecl * classAst, Type::Class * classType) {
             // ** methods forward declaration
-            for (auto & m : classAst->methods) {
-                auto methodInfo = classType->getMethodInfo(m->name.value());
-                visitChild(m->typeDecl.get());
+            for (auto & method : classAst->methods) {
+                auto methodInfo = classType->getMethodInfo(method->name.value());
+                visitChild(method->typeDecl.get());
                 printSpace();
                 printIdentifier(methodInfo->fullName);
                 printSymbol(Symbol::ParOpen);
-                printType(types_.getTypeVoidPtr());
+                printType(classType);
+                printType(Symbol::Mul);
                 printSpace();
                 printIdentifier(symbols::KwThis);
-                for (size_t i = 0; i < m->args.size(); i++) {
+                for (size_t i = 0; i < method->args.size(); i++) {
                     printSymbol(Symbol::Comma);
                     printSpace();
-                    visitChild(m->args[i]->type.get());
+                    visitChild(method->args[i]->type.get());
                     printSpace();
-                    visitChild(m->args[i]->name.get());
+                    visitChild(method->args[i]->name.get());
                 }
                 printSymbol(Symbol::ParClose);
                 printSymbol(Symbol::Semicolon);
                 printNewline();
+            }
+            // ** constructors forward declaration
+            for (auto & constructor : classAst->constructors) {
+                classConstructorIsIniting = true;
+                printConstructor(constructor.get(), true);
+                classConstructorIsIniting = false;
+                if (!classType->isAbstract()) {
+                    printConstructor(constructor.get(), true);
+                }
             }
         }
 
@@ -804,7 +814,7 @@ namespace tinycplus {
         }
 
         bool classConstructorIsIniting = true;
-        void printConstructor(ASTFunDecl * ast) {
+        void printConstructor(ASTFunDecl * ast, bool asForwardDeclaration) {
             auto * classType = peekAst()->getType()->as<Type::Class>();
             auto * funcType = ast->getType()->as<Type::Function>();
             pushAst(ast);
@@ -843,8 +853,13 @@ namespace tinycplus {
                 }
             }
             printSymbol(Symbol::ParClose);
-            printSpace();
-            visitChild(ast->body.get());
+            if (asForwardDeclaration) {
+                printSymbol(Symbol::Semicolon);
+                printNewline();
+            } else {
+                printSpace();
+                visitChild(ast->body.get());
+            }
             popAst();
         }
 

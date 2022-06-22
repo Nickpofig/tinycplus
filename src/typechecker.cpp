@@ -575,6 +575,13 @@ namespace tinycplus {
         if (auto * memberAsIdent = ast->member->as<ASTIdentifier>()) {
             auto memberName = memberAsIdent->name;
             if (auto * classType = baseType->unwrap<Type::Class>()) {
+                if (auto baseAsIdent = ast->base->as<ASTIdentifier>(); baseAsIdent->name == symbols::KwBase && classType->getBase()->hasMethod(memberName, false)) {
+                    auto methodInfo = classType->getBase()->getMethodInfo(memberName);
+                    if (methodInfo->ast->isAbstract()) throw ParserError {
+                        STR("TYPECHECK: base cannot call its abstract method: " << memberName),
+                        ast->member->location()
+                    };
+                }
                 Type::Class * originClassType = nullptr;
                 auto access = classType->getMemberAccessMod(memberName, &originClassType);
                 switch (access)
