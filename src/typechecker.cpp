@@ -238,6 +238,7 @@ namespace tinycplus {
                 visitChild(i);
                 wipeContext(position);
             }
+            isProcessingMethodDeclarationOnly = true;
             for (auto & i : ast->methods) {
                 auto position = push<Context::Complex>({type});
                 visitChild(i);
@@ -278,6 +279,12 @@ namespace tinycplus {
                     };
                 }
             }
+            isProcessingMethodDeclarationOnly = false;
+            for (auto & i : ast->methods) {
+                auto position = push<Context::Complex>({type});
+                visitChild(i);
+                wipeContext(position);
+            }
             // checks constructor reuse of base class constructors
             bool baseConstructorIsUsed = false;
             for (auto & i : ast->constructors) {
@@ -313,7 +320,7 @@ namespace tinycplus {
                 for (auto & m : interfaceType->methods_) {
                     auto classHasMethod = type->hasMethod(m.first, true);
                     if (!classHasMethod) throw ParserError {
-                        STR("TRANS: class " << ast->name << " does not implement method [" << m.first << ":" << m.second.type->toString() << "] of interface " << interfaceType->name),
+                        STR("TYPECHECK: class " << ast->name << " does not implement method [" << m.first << ":" << m.second.type->toString() << "] of interface " << interfaceType->name),
                         it->location()
                     };
                     auto classMethodType = type->getMemberType(m.first)->as<Type::Function>();
@@ -325,12 +332,16 @@ namespace tinycplus {
                         }
                     }
                     if (!argsMatches) throw ParserError {
-                        STR("TRANS: method [" << m.first << ":" << m.second.type->toString() << "] of interface " << interfaceType->name << " does not match arguments in class " << ast->name),
+                        STR("TYPECHECK: method [" << m.first << ":" << m.second.type->toString() << "] of interface " << interfaceType->name << " does not match arguments in class " << ast->name),
                         it->location()
                     };
                 }
             }
         }
+        if (undefinedMethodCalls.size() > 0) throw ParserError {
+            STR("TYPECHECK: method " << undefinedMethodCalls.begin()->first << ", which was called inside class is not know to the class"),
+            ast->location()
+        };
         currentClassType = nullptr;
     }
 
@@ -604,10 +615,6 @@ namespace tinycplus {
             } else if (auto * interfaceType = context->memberBaseType->as<Type::Interface>()) {
                 auto * ident = dynamic_cast<ASTIdentifier*>(ast->function.get());
                 auto methodType = interfaceType->getMethod(ident->name);
-                // for (auto & it : interfaceType->methods_) {
-                //     std::cout << "DEBUG: interface (" << interfaceType->name << ") has method: " << it.first << std::endl;
-                // }
-                // types_.printAllTypes();
                 if (!methodType.has_value()) throw ParserError {
                     STR("TYPECHECK: method [" << ident->name << "] was not found for interface: " << interfaceType->name), ast->location(), false
                 };

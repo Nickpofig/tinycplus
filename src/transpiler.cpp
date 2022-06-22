@@ -46,6 +46,7 @@ namespace tinycplus {
                 auto parent = peekAst();
                 if (parent->as<ASTAssignment>()
                     || parent->as<ASTVarDecl>()
+                    || parent->as<ASTCall>()
                 ) {  // pass as is for (call, assignments, declarations, cast)
                     printIdentifier(ast->name);
                 } else { // submit class instance whenever possible
@@ -220,13 +221,6 @@ namespace tinycplus {
         printComment(" --- Generated program globals --- ");
 
         {
-            // * "default class" struct declaration
-            // printKeyword(Symbol::KwStruct);
-            // printSpace();
-            // printIdentifier(symbols::KwObject);
-            // printScopeOpen();
-            // printScopeClose(true);
-
             // * null pointer declaration
             printType(types_.getTypeVoidPtr());
             printSpace();
@@ -243,6 +237,9 @@ namespace tinycplus {
             printSymbol(Symbol::ParClose);
             printSymbol(Symbol::Semicolon);
             printNewline();
+
+            // * global class cast wrapper
+            printGlobalClassCastFunction();
         }
 
         // * default interface view struct
@@ -438,30 +435,28 @@ namespace tinycplus {
         printIdentifier(ast->name.name());
         printSpace();
         if (ast->isDefinition) {
-            // ** class declaration opened
-            printSymbol(Symbol::CurlyOpen);
-            printer_.indent();
-            // ** vtable pointer declaration
-            printer_.newline();
-            printType(classType->isAbstract() ? Symbol::KwVoid : vtableType->typeName);
-            printSpace();
-            printSymbol(Symbol::Mul);
-            printSpace();
-            printIdentifier(symbols::VirtualTableAsField);
-            printSymbol(Symbol::Semicolon);
-            // ** class fields declaration
-            std::vector<FieldInfo> classFields;
-            classType->collectFieldsOrdered(classFields);
-            for (auto & i : classFields) {
+            // ** class struct scope
+            printScopeOpen();
+            {
+                // ** vtable pointer declaration
                 printer_.newline();
-                visitChild(i.ast);
+                printType(classType->isAbstract() ? Symbol::KwVoid : vtableType->typeName);
+                printSpace();
+                printSymbol(Symbol::Mul);
+                printSpace();
+                printIdentifier(symbols::VirtualTableAsField);
+                printSymbol(Symbol::Semicolon);
+                // ** class fields declaration
+                std::vector<FieldInfo> classFields;
+                classType->collectFieldsOrdered(classFields);
+                for (auto & i : classFields) {
+                    printer_.newline();
+                    visitChild(i.ast);
+                }
             }
-            // ** class declaration closed
-            printer_.dedent();
-            printer_.newline();
-            printSymbol(Symbol::CurlyClose);
-            printSymbol(Symbol::Semicolon);
-            printer_.newline();
+            printScopeClose(true);
+            printNewline();
+            printAllMethodsForwardDeclaration(ast, classType);
 
             // ** methods declaration
             for (auto & i : ast->methods) {

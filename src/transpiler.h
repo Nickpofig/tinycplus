@@ -253,16 +253,7 @@ namespace tinycplus {
                 printSymbol(Symbol::Gt);
                 printSymbol(Symbol::ParOpen);
                 {
-                    printKeyword(Symbol::KwCast);
-                    printSymbol(Symbol::Lt);
-                    printType(symbols::VirtualTableGeneralStruct);
-                    printType(Symbol::Mul);
-                    printSymbol(Symbol::Gt);
-                    printSymbol(Symbol::ParOpen);
-                    visitChild(ast->value.get());
-                    printSymbol(Symbol::ParClose);
-                    printSymbol(Symbol::ArrowR);
-                    printIdentifier(symbols::VirtualTableCastToClassField);
+                    printIdentifier(symbols::ClassCastToClassFunction);
                     printSymbol(Symbol::ParOpen);
                     if (subjectInterfaceType != nullptr) {
                         visitChild(ast->value.get());
@@ -288,6 +279,30 @@ namespace tinycplus {
                 printSymbol(Symbol::ParOpen);
                 visitChild(ast->value.get());
                 printSymbol(Symbol::ParClose);
+            }
+        }
+
+        void printAllMethodsForwardDeclaration(ASTClassDecl * classAst, Type::Class * classType) {
+            // ** methods forward declaration
+            for (auto & m : classAst->methods) {
+                auto methodInfo = classType->getMethodInfo(m->name.value());
+                visitChild(m->typeDecl.get());
+                printSpace();
+                printIdentifier(methodInfo->fullName);
+                printSymbol(Symbol::ParOpen);
+                printType(types_.getTypeVoidPtr());
+                printSpace();
+                printIdentifier(symbols::KwThis);
+                for (size_t i = 0; i < m->args.size(); i++) {
+                    printSymbol(Symbol::Comma);
+                    printSpace();
+                    visitChild(m->args[i]->type.get());
+                    printSpace();
+                    visitChild(m->args[i]->name.get());
+                }
+                printSymbol(Symbol::ParClose);
+                printSymbol(Symbol::Semicolon);
+                printNewline();
             }
         }
 
@@ -397,61 +412,20 @@ namespace tinycplus {
                 printIdentifier(localViewName);
                 printSymbol(Symbol::Semicolon);
                 printNewline();
-                // * casts class instance to general vtable ptr (as they share the same memory position)
-                printType(symbols::VirtualTableGeneralStruct);
-                printType(Symbol::Mul);
-                printSpace();
-                printIdentifier(localVtableName);
-                printSpace();
-                printSymbol(Symbol::Assign);
-                printSpace();
-                printSymbol(Symbol::KwCast);
-                printSymbol(Symbol::Lt);
-                printType(symbols::VirtualTableGeneralStruct);
-                printType(Symbol::Mul);
-                printSymbol(Symbol::Gt);
-                printSymbol(Symbol::ParOpen);
-                printIdentifier(argInstName);
-                printSymbol(Symbol::ParClose);
-                printSymbol(Symbol::Semicolon);
-                printNewline();
-                // * stores result of "check impl" function call
-                printType(type->implStructName);
-                printType(Symbol::Mul);
-                printSpace();
-                printIdentifier(localImplName);
-                printSpace();
-                printSymbol(Symbol::Assign);
-                printSpace();
-                { // cast from (void*) to (impl struct*)
-                    printSymbol(Symbol::KwCast);
-                    printSymbol(Symbol::Lt);
-                    printType(type->implStructName);
-                    printType(Symbol::Mul);
-                    printSymbol(Symbol::Gt);
-                    printSymbol(Symbol::ParOpen);
-                    { // vtable get implementation call
-                        printIdentifier(localVtableName);
-                        printSymbol(Symbol::ArrowR);
-                        printIdentifier(symbols::VirtualTableGetImplField);
-                        printSymbol(Symbol::ParOpen);
-                        printNumber(type->getId());
-                        printSymbol(Symbol::ParClose);
-                    }
-                    printSymbol(Symbol::ParClose);
-                    printSymbol(Symbol::Semicolon);
-                }
-                printNewline();
-                // * "check impl" result in if statement
+                // * check input instance for being null
                 printKeyword(Symbol::KwIf);
-                printSymbol(Symbol::ParOpen);
-                printIdentifier(localImplName);
                 printSpace();
-                printSymbol(Symbol::Eq);
+                printKeyword(Symbol::ParOpen);
+                {
+                    printIdentifier(argInstName);
+                    printSpace();
+                    printSymbol(Symbol::Eq);
+                    printSpace();
+                    printIdentifier(symbols::KwNull);
+                }
+                printKeyword(Symbol::ParClose);
                 printSpace();
-                printIdentifier(symbols::KwNull);
-                printSymbol(Symbol::ParClose);
-                printScopeOpen(); // is null case
+                printScopeOpen(); // null case
                 {
                     // * assigns (null) impl ptr to view
                     printIdentifier(localViewName);
@@ -475,27 +449,111 @@ namespace tinycplus {
                 }
                 printScopeClose(false);
                 printKeyword(Symbol::KwElse);
-                printScopeOpen(); // is not null case
+                printSpace();
+                printScopeOpen(); // not null case
                 {
-                    // * assigns impl ptr to view
-                    printIdentifier(localViewName);
-                    printSymbol(Symbol::Dot);
-                    printIdentifier(symbols::InterfaceImplAsField);
+                    // * declares general vtable ptr
+                    // * casts instance to general vtable ptr (as they share the same memory position)
+                    printType(symbols::VirtualTableGeneralStruct);
+                    printType(Symbol::Mul);
+                    printSpace();
+                    printIdentifier(localVtableName);
                     printSpace();
                     printSymbol(Symbol::Assign);
                     printSpace();
-                    printIdentifier(localImplName);
+                    printSymbol(Symbol::KwCast);
+                    printSymbol(Symbol::Lt);
+                    printType(symbols::VirtualTableGeneralStruct);
+                    printType(Symbol::Mul);
+                    printSymbol(Symbol::Gt);
+                    printSymbol(Symbol::ParOpen);
+                    printIdentifier(argInstName);
+                    printSymbol(Symbol::ParClose);
                     printSymbol(Symbol::Semicolon);
                     printNewline();
-                    // * assigns target ptr to view
-                    printIdentifier(localViewName);
-                    printSymbol(Symbol::Dot);
-                    printIdentifier(symbols::InterfaceTargetAsField);
+                    // * stores result of "check impl" function call
+                    printType(type->implStructName);
+                    printType(Symbol::Mul);
+                    printSpace();
+                    printIdentifier(localImplName);
                     printSpace();
                     printSymbol(Symbol::Assign);
                     printSpace();
-                    printIdentifier(argInstName);
-                    printSymbol(Symbol::Semicolon);
+                    { // cast from (void*) to (impl struct*)
+                        printSymbol(Symbol::KwCast);
+                        printSymbol(Symbol::Lt);
+                        printType(type->implStructName);
+                        printType(Symbol::Mul);
+                        printSymbol(Symbol::Gt);
+                        printSymbol(Symbol::ParOpen);
+                        { // vtable get implementation call
+                            printIdentifier(localVtableName);
+                            printSymbol(Symbol::ArrowR);
+                            printIdentifier(symbols::VirtualTableGetImplField);
+                            printSymbol(Symbol::ParOpen);
+                            printNumber(type->getId());
+                            printSymbol(Symbol::ParClose);
+                        }
+                        printSymbol(Symbol::ParClose);
+                        printSymbol(Symbol::Semicolon);
+                    }
+                    printNewline();
+                    // * "check impl" result in if statement
+                    printKeyword(Symbol::KwIf);
+                    printSymbol(Symbol::ParOpen);
+                    printIdentifier(localImplName);
+                    printSpace();
+                    printSymbol(Symbol::Eq);
+                    printSpace();
+                    printIdentifier(symbols::KwNull);
+                    printSymbol(Symbol::ParClose);
+                    printScopeOpen(); // is null case
+                    {
+                        // * assigns (null) impl ptr to view
+                        printIdentifier(localViewName);
+                        printSymbol(Symbol::Dot);
+                        printIdentifier(symbols::InterfaceImplAsField);
+                        printSpace();
+                        printSymbol(Symbol::Assign);
+                        printSpace();
+                        printIdentifier(symbols::KwNull);
+                        printSymbol(Symbol::Semicolon);
+                        printNewline();
+                        // * assigns (null) target ptr to view
+                        printIdentifier(localViewName);
+                        printSymbol(Symbol::Dot);
+                        printIdentifier(symbols::InterfaceTargetAsField);
+                        printSpace();
+                        printSymbol(Symbol::Assign);
+                        printSpace();
+                        printIdentifier(symbols::KwNull);
+                        printSymbol(Symbol::Semicolon);
+                    }
+                    printScopeClose(false);
+                    printKeyword(Symbol::KwElse);
+                    printScopeOpen(); // is not null case
+                    {
+                        // * assigns impl ptr to view
+                        printIdentifier(localViewName);
+                        printSymbol(Symbol::Dot);
+                        printIdentifier(symbols::InterfaceImplAsField);
+                        printSpace();
+                        printSymbol(Symbol::Assign);
+                        printSpace();
+                        printIdentifier(localImplName);
+                        printSymbol(Symbol::Semicolon);
+                        printNewline();
+                        // * assigns target ptr to view
+                        printIdentifier(localViewName);
+                        printSymbol(Symbol::Dot);
+                        printIdentifier(symbols::InterfaceTargetAsField);
+                        printSpace();
+                        printSymbol(Symbol::Assign);
+                        printSpace();
+                        printIdentifier(argInstName);
+                        printSymbol(Symbol::Semicolon);
+                    }
+                    printScopeClose(false);
                 }
                 printScopeClose(false);
             }
@@ -506,6 +564,66 @@ namespace tinycplus {
             printSymbol(Symbol::Semicolon);
             printScopeClose(false);
             printNewline();
+        }
+
+        void printGlobalClassCastFunction() {
+            auto argInstName = Symbol{"inst"};
+            auto argIdName = Symbol{"id"};
+            printType(types_.getTypeVoidPtr());
+            printSpace();
+            printIdentifier(symbols::ClassCastToClassFunction);
+            printSymbol(Symbol::ParOpen);
+            printType(types_.getTypeVoidPtr());
+            printSpace();
+            printIdentifier(argInstName);
+            printSymbol(Symbol::Comma);
+            printType(types_.getTypeInt());
+            printSpace();
+            printSymbol(argIdName);
+            printSymbol(Symbol::ParClose);
+            printScopeOpen();
+            {
+                printKeyword(Symbol::KwIf);
+                printSpace();
+                printSymbol(Symbol::ParOpen);
+                printIdentifier(argInstName);
+                printSpace();
+                printSymbol(Symbol::Eq);
+                printSpace();
+                printIdentifier(symbols::KwNull);
+                printSymbol(Symbol::ParClose);
+                printSpace();
+                printScopeOpen(); // null case
+                {
+                    printKeyword(Symbol::KwReturn);
+                    printSpace();
+                    printIdentifier(symbols::KwNull);
+                }
+                printScopeClose(false);
+                printKeyword(Symbol::KwElse);
+                printScopeOpen(); // not null case
+                {
+                    printKeyword(Symbol::KwReturn);
+                    printSpace();
+                    printKeyword(Symbol::KwCast);
+                    printSymbol(Symbol::Lt);
+                    printType(symbols::VirtualTableGeneralStruct);
+                    printType(Symbol::Mul);
+                    printSymbol(Symbol::Gt);
+                    printSymbol(Symbol::ParOpen);
+                    printIdentifier(argInstName);
+                    printSymbol(Symbol::ParClose);
+                    printSymbol(Symbol::ArrowR);
+                    printIdentifier(symbols::VirtualTableCastToClassField);
+                    printSymbol(Symbol::ParOpen);
+                    printIdentifier(argInstName);
+                    printSymbol(Symbol::Comma);
+                    printIdentifier(argIdName);
+                    printSymbol(Symbol::ParClose);
+                }
+                printScopeClose(false);
+            }
+            printScopeClose(false);
         }
 
         void printGetImplFunction(Type::Class * classType) {

@@ -17,6 +17,7 @@ namespace tinycplus {
         TypesContext & types_;
         std::unordered_map<Type*, bool> typeDefinitionChecks_;
         Type::Class * currentClassType = nullptr;
+        std::unordered_map<Symbol, AST*> undefinedMethodCalls;
         bool isProcessingPointerType = false;
 
     private: // transpiler case configurations
@@ -287,34 +288,39 @@ namespace tinycplus {
             }
         }
 
+        bool isProcessingMethodDeclarationOnly = false;
         void processMethod(ASTFunDecl * ast) {
             // gets context information
             auto context = pop<Context::Complex>();
             auto methodName = ast->name.value();
             auto * classType = context->complexType->as<Type::Class>();
             assert(classType != nullptr);
-            // creates function type
-            std::unique_ptr<Type::Function> ftype{new Type::Function{visitChild(ast->typeDecl)}};
-            checkTypeCompletion(ftype->returnType(), ast->typeDecl);
-            // adds argument types
-            auto * targetType = types_.getOrCreatePointerType(classType);
-            ftype->addArgument(targetType);
-            for (auto & i : ast->args) {
-                auto * argType = visitChild(i->type);
-                checkTypeCompletion(argType, i->type);
-                auto argClassType = argType->as<Type::Class>();
-                if (argClassType != nullptr && argClassType->isAbstract()) throw ParserError {
-                    STR("TYPECHECK: Cannot declare value type abstract class instance."),
-                    ast->location()
-                };
-                ftype->addArgument(argType);
+            if (isProcessingMethodDeclarationOnly) {
+                // creates function type
+                std::unique_ptr<Type::Function> ftype{new Type::Function{visitChild(ast->typeDecl)}};
+                checkTypeCompletion(ftype->returnType(), ast->typeDecl);
+                // adds argument types
+                auto * targetType = types_.getOrCreatePointerType(classType);
+                ftype->addArgument(targetType);
+                for (auto & i : ast->args) {
+                    auto * argType = visitChild(i->type);
+                    checkTypeCompletion(argType, i->type);
+                    auto argClassType = argType->as<Type::Class>();
+                    if (argClassType != nullptr && argClassType->isAbstract()) throw ParserError {
+                        STR("TYPECHECK: Cannot declare value type abstract class instance."),
+                        ast->location()
+                    };
+                    ftype->addArgument(argType);
+                }
+                // registers function type
+                auto * functionType = types_.getOrCreateFunctionType(std::move(ftype));
+                ast->setType(functionType);
+                // registers self as member of the class
+                types_.addMethodToClass(ast, classType);
             }
-            // registers function type
-            auto * functionType = types_.getOrCreateFunctionType(std::move(ftype));
-            ast->setType(functionType);
-            // registers self as member of the class
-            types_.addMethodToClass(ast, classType);
-            if (ast->body) {
+            else if (ast->body) {
+                // registers function type
+                auto * functionType = ast->getType()->as<Type::Function>();
                 // enters the context and add all arguments as local variables
                 names_.enterFunctionScope(functionType->returnType());
                 {
