@@ -204,6 +204,10 @@ namespace tinycplus {
     /** Type checking a structure declaration creates the type.
      */
     void TypeChecker::visit(ASTClassDecl * ast) {
+        if (ast->name == symbols::KwObject) throw ParserError {
+            STR("TYPECHECK: object class does not need forward declaration and cannot be redefined."),
+            ast->location(),
+        };
         auto * type = types_.getOrCreateClassType(ast->name);
         currentClassType = type;
         // adding default constructor function type

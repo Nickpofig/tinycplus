@@ -246,7 +246,7 @@ namespace tinycplus {
                     printSymbol(Symbol::ParClose);
                 }
                 printSymbol(Symbol::ParClose);
-            } else if (targetClassType != nullptr && targetClassType != types_.defaultClassType) {
+            } else if (targetClassType != nullptr && (subjectClassType == nullptr || !subjectClassType->inherits(targetClassType))) {
                 printKeyword(Symbol::KwCast);
                 printSymbol(Symbol::Lt);
                 visitChild(ast->type.get());
@@ -608,6 +608,7 @@ namespace tinycplus {
                     printKeyword(Symbol::KwReturn);
                     printSpace();
                     printIdentifier(symbols::KwNull);
+                    printSymbol(Symbol::Semicolon);
                 }
                 printScopeClose(false);
                 printKeyword(Symbol::KwElse);
@@ -630,6 +631,7 @@ namespace tinycplus {
                     printSymbol(Symbol::Comma);
                     printIdentifier(argIdName);
                     printSymbol(Symbol::ParClose);
+                    printSymbol(Symbol::Semicolon);
                 }
                 printScopeClose(false);
             }
