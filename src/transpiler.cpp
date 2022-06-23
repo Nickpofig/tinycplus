@@ -664,10 +664,18 @@ namespace tinycplus {
         pushAst(ast);
         {
             visitChild(ast->left.get());
+            if (ast->left->getType()->unwrap<Type::Interface>() && !ast->left->as<ASTIdentifier>()) {
+                printSymbol(Symbol::Dot);
+                printIdentifier(symbols::InterfaceTargetAsField);
+            }
             printSpace();
             printSymbol(ast->op.name());
             printSpace();
             visitChild(ast->right.get());
+            if (ast->right->getType()->unwrap<Type::Interface>() && !ast->right->as<ASTIdentifier>()) {
+                printSymbol(Symbol::Dot);
+                printIdentifier(symbols::InterfaceTargetAsField);
+            }
         }
         popAst();
     }
@@ -694,6 +702,10 @@ namespace tinycplus {
         {
             printSymbol(ast->op.name());
             visitChild(ast->arg.get());
+            if (ast->arg->getType()->unwrap<Type::Interface>() && !ast->arg->as<ASTIdentifier>()) {
+                printSymbol(Symbol::Dot);
+                printIdentifier(symbols::InterfaceTargetAsField);
+            }
             if (parentAsBlock != nullptr) {
                 printSymbol(Symbol::Semicolon);
             }
@@ -705,6 +717,10 @@ namespace tinycplus {
         pushAst(ast);
         {
             visitChild(ast->arg.get());
+            if (ast->arg->getType()->unwrap<Type::Interface>() && !ast->arg->as<ASTIdentifier>()) {
+                printSymbol(Symbol::Dot);
+                printIdentifier(symbols::InterfaceTargetAsField);
+            }
             printSymbol(ast->op.name());
         }
         popAst();
